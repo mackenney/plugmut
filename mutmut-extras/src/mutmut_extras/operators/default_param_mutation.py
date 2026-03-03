@@ -23,7 +23,7 @@ def operator_default_param_mutation(node: cst.Param) -> Iterable[cst.Param]:
 
     default = node.default
 
-    _BUILTIN_NAMES = {"True", "False", "None"}
+    _BUILTIN_NAMES = {"True", "False"}
 
     if m.matches(default, m.Name("None")):
         # Builtins don't mutate None; replace with a concrete sentinel value

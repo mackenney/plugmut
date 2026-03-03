@@ -41,6 +41,19 @@ class TestOperatorSliceRemoval:
         mutants = list(operator_slice_removal(slc))
         assert len(mutants) == 3
 
+    def test_step_removal_drops_trailing_colon(self):
+        """items[1:5:2] with step removed -> items[1:5], not items[1:5:]"""
+        expr = cst.parse_expression("items[1:5:2]")
+        assert isinstance(expr, cst.Subscript)
+        slc = expr.slice[0].slice
+        assert isinstance(slc, cst.Slice)
+        mutants = list(operator_slice_removal(slc))
+        step_removed = [m for m in mutants if m.step is None]
+        assert len(step_removed) == 1
+        new_expr = expr.with_changes(slice=[cst.SubscriptElement(slice=step_removed[0])])
+        rendered = cst.Module(body=[cst.SimpleStatementLine(body=[cst.Expr(new_expr)])]).code.strip()
+        assert rendered == "items[1:5]"
+
     def test_bare_slice_no_mutation(self):
         """items[:] -> no mutations"""
         slc = _slice_node("items[:]")
