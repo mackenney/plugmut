@@ -1,0 +1,9 @@
+[project]
+name = "mutmut2-workspace"
+version = "0.1.0"
+description = "LLM-enhanced mutation testing workspace"
+requires-python = ">=3.10"
+
+[tool.uv.workspace]
+members = ["mutmut", "mutmut-llm"]
+exclude = ["mutmut/e2e_projects/*"]

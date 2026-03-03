@@ -1,0 +1,3 @@
+[submodule "mutmut"]
+	path = mutmut
+	url = https://github.com/boxed/mutmut.git
