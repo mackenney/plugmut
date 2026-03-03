@@ -214,21 +214,34 @@ class TestOperatorIntegration:
     """Test that cached LLM mutations are picked up by mutmut run."""
 
     def _prepopulate_cache(self):
-        """Write known mutations into the cache for the e2e project."""
+        """Write known mutations into the cache for the e2e project.
+
+        fibonacci: 3 mutations, all killed by existing tests.
+        is_palindrome: 3 mutations — strip-removal survives, other two killed.
+        """
         from mutmut_llm.cache import CacheEntry, CachedMutation, write_cache_entry
 
         source = E2E_SRC.read_text()
         module = cst.parse_module(source)
 
+        func_sources: dict[str, str] = {}
         for stmt in module.body:
-            if isinstance(stmt, cst.FunctionDef) and stmt.name.value == "fibonacci":
-                func_source = module.code_for_node(stmt)
-                break
-        else:
-            raise RuntimeError("fibonacci not found in e2e source")
+            if isinstance(stmt, cst.FunctionDef) and stmt.name.value in (
+                "fibonacci",
+                "is_palindrome",
+            ):
+                func_sources[stmt.name.value] = module.code_for_node(stmt)
 
-        # A valid mutation: change the base case
-        mutated_code = '''\
+        assert "fibonacci" in func_sources, "fibonacci not found in e2e source"
+        assert "is_palindrome" in func_sources, "is_palindrome not found in e2e source"
+
+        fib_entry = CacheEntry(
+            function_name="fibonacci",
+            file_path="src/tiny/__init__.py",
+            source_hash=source_hash(func_sources["fibonacci"]),
+            mutations=[
+                CachedMutation(
+                    mutated_code='''\
 def fibonacci(n):
     """Return the nth Fibonacci number."""
     if n <= 0:
@@ -239,20 +252,80 @@ def fibonacci(n):
     for _ in range(2, n + 1):
         a, b = b, a + b
     return b
-'''
-        entry = CacheEntry(
-            function_name="fibonacci",
-            file_path="src/tiny/__init__.py",
-            source_hash=source_hash(func_source),
-            mutations=[
-                CachedMutation(
-                    mutated_code=mutated_code,
+''',
                     description="change fib(1) base case from 1 to 0",
+                ),
+                CachedMutation(
+                    mutated_code='''\
+def fibonacci(n):
+    """Return the nth Fibonacci number."""
+    if n < 0:
+        return 0
+    if n == 1:
+        return 1
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+''',
+                    description="boundary: n < 0 instead of n <= 0",
+                ),
+                CachedMutation(
+                    mutated_code='''\
+def fibonacci(n):
+    """Return the nth Fibonacci number."""
+    if n <= 0:
+        return 0
+    if n == 1:
+        return 1
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return a
+''',
+                    description="return wrong accumulator: return a instead of b",
                 ),
             ],
             model="test-manual",
         )
-        write_cache_entry(entry, base_dir=E2E_PROJECT)
+        write_cache_entry(fib_entry, base_dir=E2E_PROJECT)
+
+        pal_entry = CacheEntry(
+            function_name="is_palindrome",
+            file_path="src/tiny/__init__.py",
+            source_hash=source_hash(func_sources["is_palindrome"]),
+            mutations=[
+                CachedMutation(
+                    mutated_code='''\
+def is_palindrome(s):
+    """Check if a string is a palindrome (case-insensitive)."""
+    cleaned = s.lower()
+    return cleaned == cleaned[::-1]
+''',
+                    description="remove strip() call — no whitespace handling",
+                ),
+                CachedMutation(
+                    mutated_code='''\
+def is_palindrome(s):
+    """Check if a string is a palindrome (case-insensitive)."""
+    cleaned = s.strip()
+    return cleaned == cleaned[::-1]
+''',
+                    description="remove lower() — case-sensitive comparison",
+                ),
+                CachedMutation(
+                    mutated_code='''\
+def is_palindrome(s):
+    """Check if a string is a palindrome (case-insensitive)."""
+    cleaned = s.lower().strip()
+    return cleaned != cleaned[::-1]
+''',
+                    description="logic inversion: != instead of ==",
+                ),
+            ],
+            model="test-manual",
+        )
+        write_cache_entry(pal_entry, base_dir=E2E_PROJECT)
 
     def _run_mutmut(self) -> dict[str, int | None]:
         """Run mutmut on the e2e project with plugins enabled."""
@@ -309,6 +382,42 @@ def fibonacci(n):
         valid_codes = {0, 1, 5, 33}
         for key, code in results.items():
             assert code in valid_codes, f"Mutant '{key}' crashed with exit code {code}"
+
+    def test_llm_mutations_cover_both_functions(self):
+        """Cache entries exist for both fibonacci and is_palindrome."""
+        self._prepopulate_cache()
+        results = self._run_mutmut()
+
+        fib_mutations = {k: v for k, v in results.items() if "fibonacci" in k}
+        pal_mutations = {k: v for k, v in results.items() if "is_palindrome" in k}
+        assert fib_mutations, f"No fibonacci mutations. Keys: {sorted(results.keys())}"
+        assert pal_mutations, (
+            f"No is_palindrome mutations. Keys: {sorted(results.keys())}"
+        )
+
+    def test_surviving_mutation_detected(self):
+        """At least one LLM mutation should survive (exit code 0)."""
+        self._prepopulate_cache()
+        results = self._run_mutmut()
+
+        survivors = {k: v for k, v in results.items() if v == 0}
+        assert survivors, (
+            f"Expected at least one surviving mutation (strip-removal). Results: {results}"
+        )
+
+    def test_killed_and_survived_counts(self):
+        """Verify expected kill/survive split across all mutations."""
+        self._prepopulate_cache()
+        results = self._run_mutmut()
+
+        killed = {k for k, v in results.items() if v == 1}
+        survived = {k for k, v in results.items() if v == 0}
+
+        # 5 killed LLM mutations + builtins; at least 1 survivor (strip-removal)
+        assert len(killed) >= 5, f"Expected >=5 killed, got {len(killed)}: {killed}"
+        assert len(survived) >= 1, (
+            f"Expected >=1 survivor, got {len(survived)}: {survived}"
+        )
 
     def test_more_mutations_than_builtins_alone(self):
         """With LLM cache populated, total mutations should exceed builtins-only count."""
