@@ -81,6 +81,13 @@ def test_plugin_mutations_are_killed(e2e_results):
         "greet",
         "paginate",
         "first_come_first_served",
+        "has_prefix",
+        "clean_input",
+        "compute_difference",
+        "last_index",
+        "check_numeric",
+        "safe_parse",
+        "resilient_process",
     ]
     for fn_name in functions_to_check:
         fn_killed = [k for k in killed_keys if fn_name in k]
@@ -111,6 +118,13 @@ def test_new_operator_targets_have_mutations(e2e_results):
         "greet",
         "paginate",
         "first_come_first_served",
+        "has_prefix",
+        "clean_input",
+        "compute_difference",
+        "last_index",
+        "check_numeric",
+        "safe_parse",
+        "resilient_process",
     ]
     for target in new_targets:
         target_mutations = [k for k in e2e_results if target in k]
