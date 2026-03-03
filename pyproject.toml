@@ -3,7 +3,15 @@ name = "mutmut2-workspace"
 version = "0.1.0"
 description = "LLM-enhanced mutation testing workspace"
 requires-python = ">=3.10"
+dependencies = [
+    "mutmut",
+    "mutmut-extras",
+]
+
+[tool.uv.sources]
+mutmut = { workspace = true }
+mutmut-extras = { workspace = true }
 
 [tool.uv.workspace]
-members = ["mutmut", "mutmut-llm"]
+members = ["mutmut", "mutmut-extras"]
 exclude = ["mutmut/e2e_projects/*"]
