@@ -62,7 +62,7 @@ def e2e_results() -> dict[str, int | None]:
 def test_plugin_mutations_are_generated(e2e_results):
     """With plugins loaded, mutation count should exceed builtins-only baseline (~28)."""
     total = len(e2e_results)
-    # Builtins alone produce ~28 mutations; with extras plugins we expect ~46+
+    # Builtins alone produce ~28 mutations on the e2e_project; extras add ~18 more
     assert total > 28, f"Expected >28 mutations with plugins, got {total}"
 
 
@@ -82,6 +82,7 @@ def test_plugin_mutations_are_killed(e2e_results):
 
 def test_no_plugin_crashes(e2e_results):
     """No mutant should produce a negative exit code (segfault/crash)."""
+    # 0=survived, 1=killed, 5=skipped (no tests collected), 33=suspicious (timeout)
     valid_exit_codes = {0, 1, 5, 33}
     for key, exit_code in e2e_results.items():
         assert exit_code in valid_exit_codes, (
