@@ -1,10 +1,20 @@
 """Tests for the demo module — designed to kill most mutants."""
 
+import pytest
+
 from demo import (
+    Animal,
+    Dog,
+    build_report,
     classify,
     clamp,
+    first_come_first_served,
+    generate_evens,
+    greet,
     head,
     middle_elements,
+    paginate,
+    positive_values,
     safe_divide,
     validated_age,
 )
@@ -45,19 +55,13 @@ def test_validated_age_valid():
 
 def test_validated_age_negative():
     """If assert becomes True, this won't raise."""
-    try:
+    with pytest.raises(AssertionError):
         validated_age(-1)
-        assert False, "Should have raised AssertionError"
-    except AssertionError:
-        pass
 
 
 def test_validated_age_too_old():
-    try:
+    with pytest.raises(AssertionError):
         validated_age(300)
-        assert False, "Should have raised AssertionError"
-    except AssertionError:
-        pass
 
 
 def test_middle_elements():
@@ -86,3 +90,84 @@ def test_classify_fail():
 
 def test_classify_boundary():
     assert classify(50) == "pass"
+
+
+# --- void_call_removal ---
+
+def test_build_report():
+    """Catches void_call_removal: if append becomes pass, report is empty."""
+    assert build_report(["a", "b", "c"]) == ["A", "B", "C"]
+
+
+def test_build_report_empty():
+    assert build_report([]) == []
+
+
+# --- yield_mutation ---
+
+def test_generate_evens():
+    """Catches yield_mutation: if yield i becomes yield None, values are wrong."""
+    assert list(generate_evens(6)) == [0, 2, 4]
+
+
+def test_generate_evens_zero():
+    assert list(generate_evens(0)) == []
+
+
+# --- comprehension_filter_removal ---
+
+def test_positive_values():
+    """Catches comprehension_filter_removal: if filter removed, negatives leak through."""
+    assert positive_values([-2, -1, 0, 1, 2]) == [1, 2]
+
+
+def test_positive_values_all_negative():
+    assert positive_values([-3, -2, -1]) == []
+
+
+# --- super_call_deletion ---
+
+def test_dog_inherits_name():
+    """Catches super_call_deletion: if super().__init__() becomes pass, name missing."""
+    dog = Dog("Rex", "Labrador")
+    assert dog.name == "Rex"
+    assert dog.breed == "Labrador"
+
+
+def test_animal_init():
+    animal = Animal("Cat")
+    assert animal.name == "Cat"
+
+
+# --- fstring_mutation ---
+
+def test_greet():
+    """Catches fstring_mutation: if {name} becomes {'XX'}, output is wrong."""
+    assert greet("World") == "Hello, World!"
+
+
+def test_greet_empty():
+    assert greet("") == "Hello, !"
+
+
+# --- default_param_mutation ---
+
+def test_paginate_default():
+    """Catches default_param_mutation: if page_size=10 becomes 11, result changes."""
+    items = list(range(20))
+    assert paginate(items) == list(range(10))
+
+
+def test_paginate_explicit():
+    assert paginate([1, 2, 3, 4, 5], page_size=3) == [1, 2, 3]
+
+
+# --- reverse_iteration ---
+
+def test_first_come_first_served_order():
+    """Catches reverse_iteration: if for-loop is reversed, order changes."""
+    assert first_come_first_served([3, 1, 2]) == [3, 1, 2]
+
+
+def test_first_come_first_served_empty():
+    assert first_come_first_served([]) == []

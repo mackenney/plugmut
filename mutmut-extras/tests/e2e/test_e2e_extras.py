@@ -70,8 +70,18 @@ def test_plugin_mutations_are_killed(e2e_results):
     """Plugin-generated mutations for key functions should be killed (exit_code == 1)."""
     killed_keys = {k for k, v in e2e_results.items() if v == 1}
 
-    # Check that at least one mutation in each target function is killed
-    functions_to_check = ["safe_divide", "middle_elements", "classify"]
+    # Original functions + new operator target functions
+    functions_to_check = [
+        "safe_divide",
+        "middle_elements",
+        "classify",
+        "build_report",
+        "generate_evens",
+        "positive_values",
+        "greet",
+        "paginate",
+        "first_come_first_served",
+    ]
     for fn_name in functions_to_check:
         fn_killed = [k for k in killed_keys if fn_name in k]
         assert fn_killed, (
@@ -88,6 +98,25 @@ def test_no_plugin_crashes(e2e_results):
         assert exit_code in valid_exit_codes, (
             f"Mutant '{key}' has unexpected exit code {exit_code}. "
             f"Expected one of {valid_exit_codes}"
+        )
+
+
+def test_new_operator_targets_have_mutations(e2e_results):
+    """Each new operator target function should have at least one mutation."""
+    new_targets = [
+        "build_report",
+        "generate_evens",
+        "positive_values",
+        "Dog",
+        "greet",
+        "paginate",
+        "first_come_first_served",
+    ]
+    for target in new_targets:
+        target_mutations = [k for k in e2e_results if target in k]
+        assert target_mutations, (
+            f"No mutations found for '{target}'. "
+            f"All keys: {sorted(e2e_results.keys())}"
         )
 
 
