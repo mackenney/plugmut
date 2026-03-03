@@ -8,6 +8,7 @@ from mutmut_extras.operators.comprehension_filter import operators as comprehens
 from mutmut_extras.operators.default_param_mutation import operators as default_param_ops
 from mutmut_extras.operators.exception_handler import operators as exception_handler_ops
 from mutmut_extras.operators.fstring_mutation import operators as fstring_ops
+from mutmut_extras.operators.function_deletion import operators as function_deletion_ops
 from mutmut_extras.operators.return_none import operators as return_none_ops
 from mutmut_extras.operators.reverse_iteration import operators as reverse_iteration_ops
 from mutmut_extras.operators.slice_removal import operators as slice_removal_ops
@@ -30,6 +31,7 @@ def mutmut_register_operators() -> OPERATORS_TYPE:
         *comprehension_filter_ops,
         *super_call_ops,
         *fstring_ops,
+        *function_deletion_ops,
         *default_param_ops,
         *reverse_iteration_ops,
     ]
