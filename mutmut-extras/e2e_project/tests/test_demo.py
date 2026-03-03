@@ -6,16 +6,23 @@ from demo import (
     Animal,
     Dog,
     build_report,
+    check_numeric,
     classify,
     clamp,
+    clean_input,
+    compute_difference,
     first_come_first_served,
     generate_evens,
     greet,
+    has_prefix,
     head,
+    last_index,
     middle_elements,
     paginate,
     positive_values,
+    resilient_process,
     safe_divide,
+    safe_parse,
     validated_age,
 )
 
@@ -91,9 +98,6 @@ def test_classify_fail():
 def test_classify_boundary():
     assert classify(50) == "pass"
 
-
-# --- void_call_removal ---
-
 def test_build_report():
     """Catches void_call_removal: if append becomes pass, report is empty."""
     assert build_report(["a", "b", "c"]) == ["A", "B", "C"]
@@ -101,9 +105,6 @@ def test_build_report():
 
 def test_build_report_empty():
     assert build_report([]) == []
-
-
-# --- yield_mutation ---
 
 def test_generate_evens():
     """Catches yield_mutation: if yield i becomes yield None, values are wrong."""
@@ -113,9 +114,6 @@ def test_generate_evens():
 def test_generate_evens_zero():
     assert list(generate_evens(0)) == []
 
-
-# --- comprehension_filter_removal ---
-
 def test_positive_values():
     """Catches comprehension_filter_removal: if filter removed, negatives leak through."""
     assert positive_values([-2, -1, 0, 1, 2]) == [1, 2]
@@ -123,9 +121,6 @@ def test_positive_values():
 
 def test_positive_values_all_negative():
     assert positive_values([-3, -2, -1]) == []
-
-
-# --- super_call_deletion ---
 
 def test_dog_inherits_name():
     """Catches super_call_deletion: if super().__init__() becomes pass, name missing."""
@@ -138,9 +133,6 @@ def test_animal_init():
     animal = Animal("Cat")
     assert animal.name == "Cat"
 
-
-# --- fstring_mutation ---
-
 def test_greet():
     """Catches fstring_mutation: if {name} becomes {'XX'}, output is wrong."""
     assert greet("World") == "Hello, World!"
@@ -148,9 +140,6 @@ def test_greet():
 
 def test_greet_empty():
     assert greet("") == "Hello, !"
-
-
-# --- default_param_mutation ---
 
 def test_paginate_default():
     """Catches default_param_mutation: if page_size=10 becomes 11, result changes."""
@@ -161,9 +150,6 @@ def test_paginate_default():
 def test_paginate_explicit():
     assert paginate([1, 2, 3, 4, 5], page_size=3) == [1, 2, 3]
 
-
-# --- reverse_iteration ---
-
 def test_first_come_first_served_order():
     """Catches reverse_iteration: if for-loop is reversed, order changes."""
     assert first_come_first_served([3, 1, 2]) == [3, 1, 2]
@@ -171,3 +157,88 @@ def test_first_come_first_served_order():
 
 def test_first_come_first_served_empty():
     assert first_come_first_served([]) == []
+
+def test_has_prefix_true():
+    """Catches startswith->endswith: 'hello'.endswith('hel') is False."""
+    assert has_prefix("hello", "hel") is True
+
+
+def test_has_prefix_false():
+    assert has_prefix("hello", "xyz") is False
+
+
+def test_has_prefix_suffix_distinction():
+    """Specifically crafted so startswith != endswith."""
+    assert has_prefix("abc", "ab") is True
+    assert has_prefix("abc", "bc") is False
+
+def test_clean_input_strips_both_sides():
+    """Catches strip->lstrip or strip->rstrip: only partial stripping."""
+    assert clean_input("  hello  ") == "hello"
+
+
+def test_clean_input_left_only():
+    assert clean_input("  hello") == "hello"
+
+
+def test_clean_input_right_only():
+    assert clean_input("hello  ") == "hello"
+
+def test_compute_difference():
+    """Catches a-b -> b-a: 10-3=7, but 3-10=-7."""
+    assert compute_difference(10, 3) == 7
+
+
+def test_compute_difference_negative():
+    assert compute_difference(3, 10) == -7
+
+def test_last_index():
+    """Catches len(items)-1 -> len(items): off by one."""
+    assert last_index([1, 2, 3]) == 2
+
+
+def test_last_index_single():
+    assert last_index([42]) == 0
+
+def test_check_numeric_int():
+    assert check_numeric(42) is True
+
+
+def test_check_numeric_float():
+    """Catches isinstance(x,(int,float))->isinstance(x,int): float rejected."""
+    assert check_numeric(3.14) is True
+
+
+def test_check_numeric_string():
+    assert check_numeric("hello") is False
+
+def test_safe_parse_valid():
+    assert safe_parse("42") == 42
+
+
+def test_safe_parse_invalid():
+    """Catches ValueError->Exception: would swallow all errors."""
+    assert safe_parse("abc") is None
+
+
+def test_safe_parse_type_error():
+    """If broadened to Exception, TypeError would be caught too."""
+    with pytest.raises(TypeError):
+        safe_parse(None)
+
+def test_resilient_process():
+    """Catches pass->break: would stop after first error."""
+    assert resilient_process(["1", "bad", "3"]) == [1, 3]
+
+
+def test_resilient_process_all_valid():
+    assert resilient_process(["1", "2", "3"]) == [1, 2, 3]
+
+
+def test_resilient_process_all_invalid():
+    assert resilient_process(["a", "b"]) == []
+
+
+def test_resilient_process_error_then_valid():
+    """Catches pass->continue or pass->return."""
+    assert resilient_process(["bad", "1", "bad", "2"]) == [1, 2]

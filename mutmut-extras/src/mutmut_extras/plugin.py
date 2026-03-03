@@ -11,7 +11,6 @@ from mutmut_extras.operators.exception_handler import operators as exception_han
 from mutmut_extras.operators.exception_type_broadening import operators as exception_type_broadening_ops
 from mutmut_extras.operators.fstring_mutation import operators as fstring_ops
 from mutmut_extras.operators.function_deletion import operators as function_deletion_ops
-from mutmut_extras.operators.isinstance_type_reduction import operators as isinstance_type_reduction_ops
 from mutmut_extras.operators.operand_swap import operators as operand_swap_ops
 from mutmut_extras.operators.remove_boundary_offset import operators as boundary_offset_ops
 from mutmut_extras.operators.return_none import operators as return_none_ops
@@ -45,12 +44,6 @@ def mutmut_register_operators() -> OPERATORS_TYPE:
         *strip_to_partial_ops,
         *operand_swap_ops,
         *boundary_offset_ops,
-        *isinstance_type_reduction_ops,
         *exception_type_broadening_ops,
         *exception_control_flow_ops,
     ]
-
-
-@hookimpl
-def mutmut_allowlist_calls() -> list[str]:
-    return ["isinstance"]

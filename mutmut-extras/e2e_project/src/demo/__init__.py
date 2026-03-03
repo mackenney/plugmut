@@ -89,3 +89,47 @@ def first_come_first_served(tasks):
     for task in tasks:
         result.append(task)
     return result
+
+
+def has_prefix(text, prefix):
+    """Exercises: startswith_endswith_swap, function_deletion."""
+    return text.startswith(prefix)
+
+
+def clean_input(text):
+    """Exercises: strip_to_partial, function_deletion."""
+    return text.strip()
+
+
+def compute_difference(a, b):
+    """Exercises: operand_swap, function_deletion."""
+    return a - b
+
+
+def last_index(items):
+    """Exercises: remove_boundary_offset, function_deletion."""
+    return len(items) - 1
+
+
+def check_numeric(value):
+    """Exercises: isinstance_type_reduction, function_deletion."""
+    return isinstance(value, (int, float))
+
+
+def safe_parse(text):
+    """Exercises: exception_type_broadening, exception_control_flow, function_deletion."""
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def resilient_process(items):
+    """Exercises: exception_control_flow (pass in loop), function_deletion."""
+    results = []
+    for item in items:
+        try:
+            results.append(int(item))
+        except ValueError:
+            pass
+    return results
