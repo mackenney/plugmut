@@ -1,0 +1,127 @@
+"""File-based cache for pre-generated LLM mutations.
+
+Zero mutmut imports — stdlib only (hashlib, json, pathlib).
+Cache lives in ``.mutmut-cache/llm/`` relative to the project root.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict
+from dataclasses import dataclass
+from pathlib import Path
+
+CACHE_DIR = Path(".mutmut-cache") / "llm"
+
+
+@dataclass
+class CachedMutation:
+    mutated_code: str
+    description: str
+
+
+@dataclass
+class CacheEntry:
+    function_name: str
+    file_path: str
+    source_hash: str
+    mutations: list[CachedMutation]
+    model: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "function_name": self.function_name,
+            "file_path": self.file_path,
+            "source_hash": self.source_hash,
+            "mutations": [asdict(m) for m in self.mutations],
+            "model": self.model,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> CacheEntry:
+        mutations = [CachedMutation(**m) for m in data.get("mutations", [])]
+        return cls(
+            function_name=data["function_name"],
+            file_path=data["file_path"],
+            source_hash=data["source_hash"],
+            mutations=mutations,
+            model=data.get("model", ""),
+        )
+
+
+def source_hash(source: str) -> str:
+    """SHA-256 hash of function source, truncated to 16 hex chars."""
+    return hashlib.sha256(source.strip().encode()).hexdigest()[:16]
+
+
+def _cache_key(file_path: str, function_name: str, src_hash: str) -> str:
+    safe_path = file_path.replace("/", "_").replace("\\", "_")
+    return f"{safe_path}__{function_name}__{src_hash}"
+
+
+def _cache_dir(base_dir: Path) -> Path:
+    return base_dir / CACHE_DIR
+
+
+def write_cache_entry(entry: CacheEntry, base_dir: Path = Path(".")) -> Path:
+    """Write a cache entry to disk. Returns the path written."""
+    d = _cache_dir(base_dir)
+    d.mkdir(parents=True, exist_ok=True)
+
+    key = _cache_key(entry.file_path, entry.function_name, entry.source_hash)
+    path = d / f"{key}.json"
+    path.write_text(json.dumps(entry.to_dict(), indent=2))
+    return path
+
+
+def read_cache_entry(
+    file_path: str,
+    function_name: str,
+    src_hash: str,
+    base_dir: Path = Path("."),
+) -> CacheEntry | None:
+    """Read a cache entry. Returns None if not found or hash mismatch."""
+    key = _cache_key(file_path, function_name, src_hash)
+    path = _cache_dir(base_dir) / f"{key}.json"
+
+    if not path.exists():
+        return None
+
+    try:
+        data = json.loads(path.read_text())
+        entry = CacheEntry.from_dict(data)
+        if entry.source_hash != src_hash:
+            return None
+        return entry
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def list_cache_entries(base_dir: Path = Path(".")) -> list[CacheEntry]:
+    """List all valid cache entries."""
+    d = _cache_dir(base_dir)
+    if not d.exists():
+        return []
+
+    entries = []
+    for path in sorted(d.glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+            entries.append(CacheEntry.from_dict(data))
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return entries
+
+
+def clear_cache(base_dir: Path = Path(".")) -> int:
+    """Remove all cache entries. Returns count of removed files."""
+    d = _cache_dir(base_dir)
+    if not d.exists():
+        return 0
+
+    count = 0
+    for path in d.glob("*.json"):
+        path.unlink()
+        count += 1
+    return count
