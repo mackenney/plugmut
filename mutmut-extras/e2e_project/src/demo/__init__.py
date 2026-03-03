@@ -1,8 +1,11 @@
-"""Demo module exercising all mutmut-extras operator targets."""
+"""Demo module exercising all mutmut-extras operator targets.
+
+Every function and method also exercises function_deletion (body replaced with pass).
+"""
 
 
 def safe_divide(a, b):
-    """Return a/b, or None on error. Exercises: return_none, exception_handler."""
+    """Return a/b, or None on error. Exercises: return_none, exception_handler, function_deletion."""
     try:
         result = a / b
     except ZeroDivisionError:
@@ -11,35 +14,35 @@ def safe_divide(a, b):
 
 
 def clamp(value, lo, hi):
-    """Clamp value to [lo, hi]. Exercises: ternary."""
+    """Clamp value to [lo, hi]. Exercises: ternary, function_deletion."""
     return lo if value < lo else (hi if value > hi else value)
 
 
 def validated_age(age):
-    """Validate age is positive. Exercises: assert_true."""
+    """Validate age is positive. Exercises: assert_true, function_deletion."""
     assert age >= 0, "age must be non-negative"
     assert age < 200, "age must be realistic"
     return age
 
 
 def middle_elements(items):
-    """Return the middle portion of a list. Exercises: slice_removal."""
+    """Return the middle portion of a list. Exercises: slice_removal, function_deletion."""
     return items[1:-1]
 
 
 def head(items, n):
-    """Return first n items. Exercises: slice_removal."""
+    """Return first n items. Exercises: slice_removal, function_deletion."""
     return items[:n]
 
 
 def classify(score):
-    """Classify a score. Exercises: ternary, return_none."""
+    """Classify a score. Exercises: ternary, return_none, function_deletion."""
     label = "pass" if score >= 50 else "fail"
     return label
 
 
 def build_report(items):
-    """Accumulate uppercased items. Exercises: void_call_removal, reverse_iteration."""
+    """Accumulate uppercased items. Exercises: void_call_removal, reverse_iteration, function_deletion."""
     report = []
     for item in items:
         report.append(item.upper())
@@ -47,14 +50,14 @@ def build_report(items):
 
 
 def generate_evens(n):
-    """Yield even numbers up to n. Exercises: yield_mutation."""
+    """Yield even numbers up to n. Exercises: yield_mutation, function_deletion."""
     for i in range(n):
         if i % 2 == 0:
             yield i
 
 
 def positive_values(items):
-    """Filter to positive values. Exercises: comprehension_filter_removal."""
+    """Filter to positive values. Exercises: comprehension_filter_removal, function_deletion."""
     return [x for x in items if x > 0]
 
 
@@ -64,24 +67,24 @@ class Animal:
 
 
 class Dog(Animal):
-    """Exercises: super_call_deletion."""
+    """Exercises: super_call_deletion, function_deletion."""
     def __init__(self, name, breed):
         super().__init__(name)
         self.breed = breed
 
 
 def greet(name):
-    """Exercises: fstring_mutation."""
+    """Exercises: fstring_mutation, function_deletion."""
     return f"Hello, {name}!"
 
 
 def paginate(items, page_size=10):
-    """Exercises: default_param_mutation, slice_removal."""
+    """Exercises: default_param_mutation, slice_removal, function_deletion."""
     return items[:page_size]
 
 
 def first_come_first_served(tasks):
-    """Exercises: reverse_iteration, void_call_removal."""
+    """Exercises: reverse_iteration, void_call_removal, function_deletion."""
     result = []
     for task in tasks:
         result.append(task)
