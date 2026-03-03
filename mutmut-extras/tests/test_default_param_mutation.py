@@ -31,19 +31,7 @@ def _isolate_plugins(monkeypatch):
 
 
 class TestOperatorDefaultParamMutation:
-    def test_bool_true_flips(self):
-        node = _param_with_default("def f(x=True):")
-        mutants = list(operator_default_param_mutation(node))
-        assert len(mutants) == 1
-        assert isinstance(mutants[0].default, cst.Name)
-        assert mutants[0].default.value == "False"
-
-    def test_bool_false_flips(self):
-        node = _param_with_default("def f(x=False):")
-        mutants = list(operator_default_param_mutation(node))
-        assert len(mutants) == 1
-        assert isinstance(mutants[0].default, cst.Name)
-        assert mutants[0].default.value == "True"
+    # Unique cases: builtins don't handle these
 
     def test_none_becomes_zero(self):
         node = _param_with_default("def f(x=None):")
@@ -52,26 +40,53 @@ class TestOperatorDefaultParamMutation:
         assert isinstance(mutants[0].default, cst.Integer)
         assert mutants[0].default.value == "0"
 
-    def test_integer_increments(self):
-        node = _param_with_default("def f(x=100):")
-        mutants = list(operator_default_param_mutation(node))
-        assert len(mutants) == 1
-        assert isinstance(mutants[0].default, cst.Integer)
-        assert mutants[0].default.value == "101"
-
-    def test_float_increments(self):
-        node = _param_with_default("def f(x=1.5):")
-        mutants = list(operator_default_param_mutation(node))
-        assert len(mutants) == 1
-        assert isinstance(mutants[0].default, cst.Float)
-        assert abs(float(mutants[0].default.value) - 2.5) < 1e-9
-
-    def test_name_becomes_none(self):
+    def test_name_sentinel_becomes_none(self):
         node = _param_with_default("def f(x=SENTINEL):")
         mutants = list(operator_default_param_mutation(node))
         assert len(mutants) == 1
         assert isinstance(mutants[0].default, cst.Name)
         assert mutants[0].default.value == "None"
+
+    def test_call_default_becomes_none(self):
+        node = _param_with_default("def f(x=list()):")
+        mutants = list(operator_default_param_mutation(node))
+        assert len(mutants) == 1
+        assert isinstance(mutants[0].default, cst.Name)
+        assert mutants[0].default.value == "None"
+
+    def test_tuple_default_becomes_none(self):
+        node = _param_with_default("def f(x=(1, 2)):")
+        mutants = list(operator_default_param_mutation(node))
+        assert len(mutants) == 1
+        assert isinstance(mutants[0].default, cst.Name)
+        assert mutants[0].default.value == "None"
+
+    # Cases builtins already handle: operator must NOT generate these
+
+    def test_bool_true_not_mutated(self):
+        node = _param_with_default("def f(x=True):")
+        mutants = list(operator_default_param_mutation(node))
+        assert mutants == []
+
+    def test_bool_false_not_mutated(self):
+        node = _param_with_default("def f(x=False):")
+        mutants = list(operator_default_param_mutation(node))
+        assert mutants == []
+
+    def test_integer_not_mutated(self):
+        node = _param_with_default("def f(x=100):")
+        mutants = list(operator_default_param_mutation(node))
+        assert mutants == []
+
+    def test_float_not_mutated(self):
+        node = _param_with_default("def f(x=1.5):")
+        mutants = list(operator_default_param_mutation(node))
+        assert mutants == []
+
+    def test_string_not_mutated(self):
+        node = _param_with_default('def f(x="hello"):')
+        mutants = list(operator_default_param_mutation(node))
+        assert mutants == []
 
     def test_no_default_no_mutation(self):
         module = cst.parse_module("def f(x):\n    pass\n")
@@ -84,7 +99,7 @@ class TestOperatorDefaultParamMutation:
 
 
 class TestDefaultParamMutationIntegration:
-    def test_create_mutations_includes_default_param(self):
+    def test_create_mutations_includes_none_to_zero(self):
         class _TestPlugin:
             @hookimpl
             def mutmut_register_operators(self):
@@ -93,7 +108,7 @@ class TestDefaultParamMutationIntegration:
         pm = get_plugin_manager()
         pm.register(_TestPlugin())
 
-        source = "def process(items, reverse=False):\n    pass\n"
+        source = "def process(items, timeout=None):\n    pass\n"
         module, mutations = create_mutations(source)
 
         mutated_codes = []
@@ -102,4 +117,24 @@ class TestDefaultParamMutationIntegration:
             assert isinstance(replaced, cst.Module)
             mutated_codes.append(replaced.code)
 
-        assert any("reverse=True" in code for code in mutated_codes)
+        assert any("timeout=0" in code for code in mutated_codes)
+
+    def test_create_mutations_includes_sentinel_to_none(self):
+        class _TestPlugin:
+            @hookimpl
+            def mutmut_register_operators(self):
+                return list(default_param_ops)
+
+        pm = get_plugin_manager()
+        pm.register(_TestPlugin())
+
+        source = "def process(items, sentinel=MISSING):\n    pass\n"
+        module, mutations = create_mutations(source)
+
+        mutated_codes = []
+        for mut in mutations:
+            replaced = module.deep_replace(mut.original_node, mut.mutated_node)
+            assert isinstance(replaced, cst.Module)
+            mutated_codes.append(replaced.code)
+
+        assert any("sentinel=None" in code for code in mutated_codes)
