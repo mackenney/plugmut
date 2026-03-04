@@ -3,10 +3,18 @@
 Registers:
 - ``operator_llm`` (FunctionDef operator) via ``mutmut_register_operators``
 - ``mutmut generate`` CLI command via ``mutmut_register_commands``
+- ``mutmut llm-status`` CLI command for cache/run status
 - Config loading via ``mutmut_configure``
+- Run result tracking via ``mutmut_post_test`` / ``mutmut_post_run``
+- LLM mutant identification via ``mutmut_mutations_created``
 """
 
 from __future__ import annotations
+
+from collections import defaultdict
+from collections.abc import Sequence
+from datetime import datetime
+from datetime import timezone
 
 import click
 import libcst as cst
@@ -14,19 +22,61 @@ import libcst as cst
 from mutmut.hookspecs import hookimpl
 from mutmut.node_mutation import OPERATORS_TYPE
 
-from mutmut_llm.config import LLMConfig, load_config
+from mutmut_llm.cache import list_cache_entries
+from mutmut_llm.config import LLMConfig
+from mutmut_llm.config import load_config
 from mutmut_llm.operators import operator_llm
+from mutmut_llm.reporting import format_run_summary
+from mutmut_llm.storage import MutantResult
+from mutmut_llm.storage import RunResult
+from mutmut_llm.storage import load_latest_run
+from mutmut_llm.storage import new_run
+from mutmut_llm.storage import save_run
 
 _llm_config: LLMConfig | None = None
 _mutmut_paths: list[str] = []
+_llm_mutant_names: set[str] = set()
+_current_run: RunResult | None = None
+
+
+def _extract_function_name(mutant_name: str) -> str:
+    """Extract the bare function name from a mangled mutant name.
+
+    Mirrors mutmut's ``orig_function_and_class_names_from_key`` logic:
+    - ``x_func__mutmut_1`` -> ``func``
+    - ``xǁClassǁmethod__mutmut_2`` -> ``method``
+    - Dotted module prefix (e.g. ``mod.x_func__mutmut_1``) is stripped.
+    """
+    CLASS_NAME_SEPARATOR = "\u01c1"
+
+    base = mutant_name.partition("__mutmut_")[0]
+    # Strip module prefix if present (e.g. "some.module.x_func")
+    _, _, base = base.rpartition(".")
+
+    if CLASS_NAME_SEPARATOR in base:
+        return base[base.rindex(CLASS_NAME_SEPARATOR) + 1 :]
+
+    if base.startswith("x_"):
+        return base[2:]
+
+    return base
+
+
+def _llm_mutation_count_by_function() -> dict[str, int]:
+    """Count LLM mutations per function name from the cache."""
+    counts: dict[str, int] = defaultdict(int)
+    for entry in list_cache_entries():
+        counts[entry.function_name] += len(entry.mutations)
+    return counts
 
 
 @hookimpl
 def mutmut_configure(config: object) -> None:
-    global _llm_config, _mutmut_paths
+    global _llm_config, _mutmut_paths, _current_run
     _llm_config = load_config()
     if hasattr(config, "paths_to_mutate"):
         _mutmut_paths = [str(p) for p in config.paths_to_mutate]
+    _current_run = new_run()
 
 
 @hookimpl
@@ -34,6 +84,59 @@ def mutmut_register_operators() -> OPERATORS_TYPE:
     if _llm_config and _llm_config.enabled:
         return [(cst.FunctionDef, operator_llm)]
     return []
+
+
+@hookimpl
+def mutmut_mutations_created(
+    filename: str, source_by_mutant_name: dict[str, str]
+) -> None:
+    """Identify which mutants came from the LLM operator.
+
+    For each function, builtin operators run first. The LLM operator appends
+    its mutations after. So for a function with B builtin + L LLM mutations,
+    the last L mutant indices belong to the LLM operator.
+    """
+    llm_counts = _llm_mutation_count_by_function()
+    if not llm_counts:
+        return
+
+    # Group mutant names by function name, preserving order
+    mutants_by_func: dict[str, list[str]] = defaultdict(list)
+    for mutant_name in source_by_mutant_name:
+        func_name = _extract_function_name(mutant_name)
+        mutants_by_func[func_name].append(mutant_name)
+
+    for func_name, mutant_names in mutants_by_func.items():
+        llm_count = llm_counts.get(func_name, 0)
+        if llm_count <= 0:
+            continue
+        # LLM mutations are the last `llm_count` in the list
+        llm_mutants = mutant_names[-llm_count:]
+        _llm_mutant_names.update(llm_mutants)
+
+
+@hookimpl
+def mutmut_post_test(
+    mutant_name: str, exit_code: int, status: str, duration: float
+) -> None:
+    if _current_run is None:
+        return
+    _current_run.results.append(
+        MutantResult(
+            mutant_name=mutant_name,
+            status=status,
+            duration=duration,
+            is_llm=mutant_name in _llm_mutant_names,
+        )
+    )
+
+
+@hookimpl
+def mutmut_post_run(source_file_mutation_data: Sequence) -> None:
+    if _current_run is None:
+        return
+    _current_run.completed_at = datetime.now(timezone.utc).isoformat()
+    save_run(_current_run)
 
 
 @hookimpl
@@ -51,3 +154,19 @@ def mutmut_register_commands(cli_group: object) -> None:
         config = _llm_config or load_config()
         scan_paths = list(paths) if paths else (_mutmut_paths or ["src"])
         run_generation(config=config, paths=scan_paths, budget=budget, dry_run=dry_run)
+
+    @cli_group.command("llm-status")  # type: ignore[union-attr]
+    def llm_status() -> None:
+        """Show LLM mutation cache stats, latest run, and config."""
+        config = _llm_config or load_config()
+
+        entries = list_cache_entries()
+        total_mutations = sum(len(e.mutations) for e in entries)
+        click.echo(f"LLM config: enabled={config.enabled}, model={config.model}")
+        click.echo(f"Cache: {len(entries)} functions, {total_mutations} mutations")
+
+        latest = load_latest_run()
+        if latest:
+            click.echo(f"Latest run ({latest.run_id}): {format_run_summary(latest)}")
+        else:
+            click.echo("No runs recorded.")

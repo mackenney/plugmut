@@ -12,6 +12,7 @@ build/
 
 .mutmut-llm-cache/
 .mutmut-llm.db
+**/.mutmut-cache/
 
 *.so
 .mypy_cache/
