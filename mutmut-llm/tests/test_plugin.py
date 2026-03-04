@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import click
 import libcst as cst
-import pytest
 
 from mutmut_llm.cache import CacheEntry
 from mutmut_llm.cache import CachedMutation
@@ -24,17 +23,6 @@ from mutmut_llm.storage import load_latest_run
 from mutmut_llm.storage import new_run
 
 
-@pytest.fixture(autouse=True)
-def _reset_plugin_state(monkeypatch):
-    """Reset plugin module-level state between tests."""
-    import mutmut_llm.plugin as mod
-
-    monkeypatch.setattr(mod, "_llm_config", None)
-    monkeypatch.setattr(mod, "_mutmut_paths", [])
-    monkeypatch.setattr(mod, "_llm_mutant_names", set())
-    monkeypatch.setattr(mod, "_current_run", None)
-
-
 class TestExtractFunctionName:
     def test_simple_function(self):
         assert _extract_function_name("x_foo__mutmut_1") == "foo"
@@ -43,10 +31,16 @@ class TestExtractFunctionName:
         assert _extract_function_name("some.module.x_bar__mutmut_3") == "bar"
 
     def test_with_class(self):
-        assert _extract_function_name("x\u01c1MyClass\u01c1method__mutmut_2") == "method"
+        assert (
+            _extract_function_name("x\u01c1MyClass\u01c1method__mutmut_2")
+            == "MyClass.method"
+        )
 
     def test_with_class_and_module(self):
-        assert _extract_function_name("mod.x\u01c1Cls\u01c1do_thing__mutmut_5") == "do_thing"
+        assert (
+            _extract_function_name("mod.x\u01c1Cls\u01c1do_thing__mutmut_5")
+            == "Cls.do_thing"
+        )
 
 
 class TestMutmutConfigure:
@@ -83,6 +77,26 @@ class TestMutmutConfigure:
         mutmut_configure(config=mock_config)
 
         assert mod._mutmut_paths == []
+
+    def test_clears_llm_mutant_names(self, monkeypatch):
+        import mutmut_llm.plugin as mod
+
+        monkeypatch.setattr("mutmut_llm.config.find_pyproject", lambda start=None: None)
+        mod._llm_mutant_names.update({"x_foo__mutmut_1", "x_bar__mutmut_2"})
+
+        mutmut_configure(config=MagicMock(spec=[]))
+
+        assert mod._llm_mutant_names == set()
+
+    def test_resets_cache_index(self, monkeypatch):
+        import mutmut_llm.operators as ops_mod
+
+        monkeypatch.setattr("mutmut_llm.config.find_pyproject", lambda start=None: None)
+        ops_mod._cache_index = {"fake": "data"}
+
+        mutmut_configure(config=MagicMock(spec=[]))
+
+        assert ops_mod._cache_index is None
 
     def test_initializes_current_run(self, monkeypatch):
         import mutmut_llm.plugin as mod
@@ -156,10 +170,15 @@ class TestMutmutMutationsCreated:
                 function_name="foo",
                 file_path="src/mod.py",
                 source_hash="abc123",
-                mutations=[CachedMutation("code1", "d1"), CachedMutation("code2", "d2")],
+                mutations=[
+                    CachedMutation("code1", "d1"),
+                    CachedMutation("code2", "d2"),
+                ],
             )
         ]
-        monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: cache_entries)
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
+        )
 
         source_by_mutant_name = {
             "x_foo__mutmut_1": "",
@@ -167,7 +186,9 @@ class TestMutmutMutationsCreated:
             "x_foo__mutmut_3": "",
             "x_foo__mutmut_4": "",
         }
-        mutmut_mutations_created(filename="src/mod.py", source_by_mutant_name=source_by_mutant_name)
+        mutmut_mutations_created(
+            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+        )
 
         assert "x_foo__mutmut_3" in mod._llm_mutant_names
         assert "x_foo__mutmut_4" in mod._llm_mutant_names
@@ -180,7 +201,9 @@ class TestMutmutMutationsCreated:
         monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: [])
 
         source_by_mutant_name = {"x_foo__mutmut_1": "", "x_foo__mutmut_2": ""}
-        mutmut_mutations_created(filename="src/mod.py", source_by_mutant_name=source_by_mutant_name)
+        mutmut_mutations_created(
+            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+        )
 
         assert mod._llm_mutant_names == set()
 
@@ -195,7 +218,9 @@ class TestMutmutMutationsCreated:
                 mutations=[CachedMutation("code1", "d1")],
             )
         ]
-        monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: cache_entries)
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
+        )
 
         source_by_mutant_name = {
             "x_foo__mutmut_1": "",
@@ -204,7 +229,9 @@ class TestMutmutMutationsCreated:
             "x_bar__mutmut_2": "",
             "x_bar__mutmut_3": "",
         }
-        mutmut_mutations_created(filename="src/mod.py", source_by_mutant_name=source_by_mutant_name)
+        mutmut_mutations_created(
+            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+        )
 
         # Only the last mutant for 'bar' should be LLM (1 LLM mutation)
         assert "x_bar__mutmut_3" in mod._llm_mutant_names
@@ -213,6 +240,35 @@ class TestMutmutMutationsCreated:
         # 'foo' has no cache entries
         assert "x_foo__mutmut_1" not in mod._llm_mutant_names
         assert "x_foo__mutmut_2" not in mod._llm_mutant_names
+
+    def test_class_method_mutants_matched(self, monkeypatch):
+        """Cache stores 'MyClass.method'; mutant names use ǁ separator. They must match."""
+        import mutmut_llm.plugin as mod
+
+        cache_entries = [
+            CacheEntry(
+                function_name="MyClass.method",
+                file_path="src/mod.py",
+                source_hash="abc",
+                mutations=[CachedMutation("code1", "d1")],
+            )
+        ]
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
+        )
+
+        source_by_mutant_name = {
+            "x\u01c1MyClass\u01c1method__mutmut_1": "",
+            "x\u01c1MyClass\u01c1method__mutmut_2": "",
+            "x\u01c1MyClass\u01c1method__mutmut_3": "",
+        }
+        mutmut_mutations_created(
+            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+        )
+
+        assert "x\u01c1MyClass\u01c1method__mutmut_3" in mod._llm_mutant_names
+        assert "x\u01c1MyClass\u01c1method__mutmut_1" not in mod._llm_mutant_names
+        assert "x\u01c1MyClass\u01c1method__mutmut_2" not in mod._llm_mutant_names
 
 
 class TestMutmutPostTest:
@@ -223,8 +279,12 @@ class TestMutmutPostTest:
         monkeypatch.setattr(mod, "_current_run", run)
         monkeypatch.setattr(mod, "_llm_mutant_names", {"x_foo__mutmut_2"})
 
-        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.3)
-        mutmut_post_test(mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.5)
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.3
+        )
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.5
+        )
 
         assert len(run.results) == 2
         assert run.results[0].mutant_name == "x_foo__mutmut_1"
@@ -239,7 +299,9 @@ class TestMutmutPostTest:
 
         monkeypatch.setattr(mod, "_current_run", None)
         # Should not raise
-        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1
+        )
 
 
 class TestMutmutPostRun:
@@ -251,8 +313,13 @@ class TestMutmutPostRun:
         monkeypatch.setattr(mod, "_current_run", run)
 
         cache_root = tmp_path / "cache"
-        monkeypatch.setattr(storage, "_runs_dir", lambda cache_root=None: cache_root / "runs")
-        monkeypatch.setattr("mutmut_llm.plugin.save_run", lambda r: storage.save_run(r, cache_root=cache_root))
+        monkeypatch.setattr(
+            storage, "_runs_dir", lambda cache_root=None: cache_root / "runs"
+        )
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.save_run",
+            lambda r: storage.save_run(r, cache_root=cache_root),
+        )
 
         mutmut_post_run(source_file_mutation_data=[])
 
@@ -287,10 +354,14 @@ class TestFullLifecycle:
                 mutations=[CachedMutation("def compute(): return 1", "negate")],
             )
         ]
-        monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: cache_entries)
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
+        )
 
         # Redirect save_run to tmp_path
-        original_save_run = mod.save_run.__wrapped__ if hasattr(mod.save_run, "__wrapped__") else None
+        original_save_run = (
+            mod.save_run.__wrapped__ if hasattr(mod.save_run, "__wrapped__") else None
+        )
 
         def patched_save_run(r):
             from mutmut_llm.storage import save_run as real_save
@@ -317,10 +388,30 @@ class TestFullLifecycle:
         assert len(mod._llm_mutant_names) == 1
 
         # 3. Post-test for each mutant
-        mutmut_post_test(mutant_name="x_compute__mutmut_1", exit_code=1, status="killed", duration=0.2)
-        mutmut_post_test(mutant_name="x_compute__mutmut_2", exit_code=1, status="killed", duration=0.3)
-        mutmut_post_test(mutant_name="x_compute__mutmut_3", exit_code=0, status="survived", duration=0.4)
-        mutmut_post_test(mutant_name="x_compute__mutmut_4", exit_code=1, status="killed", duration=0.5)
+        mutmut_post_test(
+            mutant_name="x_compute__mutmut_1",
+            exit_code=1,
+            status="killed",
+            duration=0.2,
+        )
+        mutmut_post_test(
+            mutant_name="x_compute__mutmut_2",
+            exit_code=1,
+            status="killed",
+            duration=0.3,
+        )
+        mutmut_post_test(
+            mutant_name="x_compute__mutmut_3",
+            exit_code=0,
+            status="survived",
+            duration=0.4,
+        )
+        mutmut_post_test(
+            mutant_name="x_compute__mutmut_4",
+            exit_code=1,
+            status="killed",
+            duration=0.5,
+        )
 
         assert len(mod._current_run.results) == 4
 

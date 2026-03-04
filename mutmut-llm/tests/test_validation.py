@@ -57,6 +57,13 @@ class TestValidateImports:
         assert result is not None
         assert "sys" in result
 
+    def test_new_import_inside_function_rejected(self):
+        original = "def f():\n    return 1"
+        mutated = "def f():\n    import os\n    return os.getcwd()"
+        result = validate_imports(mutated, original)
+        assert result is not None
+        assert "os" in result
+
     def test_no_imports_in_either(self):
         assert validate_imports("def f(): pass", "def g(): pass") is None
 
@@ -121,10 +128,21 @@ class TestExtractImports:
     def test_unparseable_code(self):
         assert _extract_imports("def broken(\n") == set()
 
-    def test_import_inside_function_not_captured(self):
-        # Only top-level imports are captured (SimpleStatementLine at module level)
+    def test_import_inside_function_captured(self):
         code = "def f():\n    import os\n    return os.getcwd()"
-        assert _extract_imports(code) == set()
+        assert _extract_imports(code) == {"os"}
+
+    def test_from_import_inside_function_captured(self):
+        code = "def f():\n    from subprocess import run\n    return run(['ls'])"
+        assert _extract_imports(code) == {"subprocess"}
+
+    def test_import_inside_nested_block_captured(self):
+        code = "def f():\n    if True:\n        import sys\n    return sys.argv"
+        assert _extract_imports(code) == {"sys"}
+
+    def test_mixed_toplevel_and_nested_imports(self):
+        code = "import os\ndef f():\n    import sys\n    return sys.argv"
+        assert _extract_imports(code) == {"os", "sys"}
 
     def test_multiple_names_in_single_import(self):
         assert _extract_imports("import os, sys") == {"os", "sys"}

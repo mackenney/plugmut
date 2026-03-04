@@ -8,15 +8,7 @@ import libcst as cst
 import pytest
 
 from mutmut_llm.cache import CacheEntry, CachedMutation, source_hash, write_cache_entry
-from mutmut_llm.operators import _parse_mutation, _reset_cache_index, operator_llm
-
-
-@pytest.fixture(autouse=True)
-def _clean_cache_index():
-    """Reset the in-memory cache index before each test."""
-    _reset_cache_index()
-    yield
-    _reset_cache_index()
+from mutmut_llm.operators import _parse_mutation, operator_llm
 
 
 def _make_func_node(source: str) -> cst.FunctionDef:

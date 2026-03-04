@@ -161,13 +161,13 @@ class TestAllocateBudget:
             ScopeTarget(file_path="f.py", function_name="b", source=""),
         ]
         alloc = _allocate_budget(targets, 10, 5)
-        assert alloc["a"] == 5
-        assert alloc["b"] == 5
+        assert alloc["f.py::a"] == 5
+        assert alloc["f.py::b"] == 5
 
     def test_capped_at_max_per_function(self):
         targets = [ScopeTarget(file_path="f.py", function_name="a", source="")]
         alloc = _allocate_budget(targets, 100, 3)
-        assert alloc["a"] == 3
+        assert alloc["f.py::a"] == 3
 
     def test_budget_less_than_targets(self):
         targets = [
@@ -176,10 +176,29 @@ class TestAllocateBudget:
             ScopeTarget(file_path="f.py", function_name="c", source=""),
         ]
         alloc = _allocate_budget(targets, 1, 5)
-        # Each gets at least 1 if budget allows (budget/len = 0, but max(1, ...) = 1)
-        # But total budget = 1 < len(targets) * per_function... let's check
-        # per_function = min(5, max(1, 1//3)) = min(5, max(1, 0)) = min(5, 1) = 1
-        assert all(v == 1 for v in alloc.values())
+        assert sum(alloc.values()) <= 1
+
+    def test_total_never_exceeds_budget(self):
+        """3 targets, budget=2 — must not allocate more than 2 total."""
+        targets = [
+            ScopeTarget(file_path="f.py", function_name="a", source=""),
+            ScopeTarget(file_path="f.py", function_name="b", source=""),
+            ScopeTarget(file_path="f.py", function_name="c", source=""),
+        ]
+        alloc = _allocate_budget(targets, 2, 5)
+        assert sum(alloc.values()) <= 2
+        assert all(v >= 1 for v in alloc.values())
+
+    def test_file_qualified_keys_no_collision(self):
+        """Same function_name in different files must get separate allocations."""
+        targets = [
+            ScopeTarget(file_path="a.py", function_name="helper", source=""),
+            ScopeTarget(file_path="b.py", function_name="helper", source=""),
+        ]
+        alloc = _allocate_budget(targets, 10, 5)
+        assert len(alloc) == 2
+        assert "a.py::helper" in alloc
+        assert "b.py::helper" in alloc
 
 
 class TestResolveScopeDeep:

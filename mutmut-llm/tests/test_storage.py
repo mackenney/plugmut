@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mutmut_llm.storage import (
     MutantResult,
     RunResult,
@@ -13,11 +11,6 @@ from mutmut_llm.storage import (
     new_run,
     save_run,
 )
-
-
-@pytest.fixture()
-def cache_root(tmp_path):
-    return tmp_path / "cache"
 
 
 def _make_result(

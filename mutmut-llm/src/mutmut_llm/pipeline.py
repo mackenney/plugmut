@@ -53,7 +53,7 @@ def run_generation(
     if dry_run:
         click.echo("\nDry run — functions that would be mutated:")
         for t in scope.targets:
-            n = scope.budget_per_target.get(t.function_name, 0)
+            n = scope.budget_per_target.get(f"{t.file_path}::{t.function_name}", 0)
             click.echo(f"  {t.file_path}::{t.function_name} (budget: {n})")
         return 0
 
@@ -99,7 +99,8 @@ def _generate_mutations(
             continue
 
         max_mutations = budget_per_target.get(
-            target.function_name, config.max_mutations_per_function
+            f"{target.file_path}::{target.function_name}",
+            config.max_mutations_per_function,
         )
         click.echo(f"  {target.file_path}::{target.function_name} — generating...")
 

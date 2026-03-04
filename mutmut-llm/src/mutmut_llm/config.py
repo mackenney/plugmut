@@ -27,8 +27,6 @@ else:
     except ModuleNotFoundError:
         import tomli as tomllib  # type: ignore[no-redef,import-not-found]
 
-_KNOWN_KEYS = {"model", "max_mutations_per_function", "max_tokens", "enabled"}
-
 
 @dataclass
 class LLMConfig:

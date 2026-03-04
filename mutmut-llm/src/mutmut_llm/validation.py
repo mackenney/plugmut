@@ -37,27 +37,33 @@ def validate_mutation(mutated_code: str, original_code: str) -> str | None:
     return validate_imports(mutated_code, original_code)
 
 
+class _ImportCollector(cst.CSTVisitor):
+    """Walks the entire tree to find imports at any nesting level."""
+
+    def __init__(self) -> None:
+        self.imports: set[str] = set()
+
+    def visit_Import(self, node: cst.Import) -> None:
+        if isinstance(node.names, (list, tuple)):
+            for alias in node.names:
+                if isinstance(alias, cst.ImportAlias):
+                    self.imports.add(_name_to_str(alias.name))
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
+        if node.module:
+            self.imports.add(_name_to_str(node.module))
+
+
 def _extract_imports(code: str) -> set[str]:
-    """Extract top-level import module names from *code*."""
+    """Extract all import module names from *code*, including nested scopes."""
     try:
         module = cst.parse_module(code)
     except cst.ParserSyntaxError:
         return set()
 
-    imports: set[str] = set()
-    for stmt in module.body:
-        if not isinstance(stmt, cst.SimpleStatementLine):
-            continue
-        for item in stmt.body:
-            if isinstance(item, cst.Import):
-                if isinstance(item.names, (list, tuple)):
-                    for alias in item.names:
-                        if isinstance(alias, cst.ImportAlias):
-                            imports.add(_name_to_str(alias.name))
-            elif isinstance(item, cst.ImportFrom):
-                if item.module:
-                    imports.add(_name_to_str(item.module))
-    return imports
+    collector = _ImportCollector()
+    module.visit(collector)
+    return collector.imports
 
 
 def _name_to_str(name: cst.BaseExpression) -> str:

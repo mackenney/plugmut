@@ -128,9 +128,17 @@ def _allocate_budget(
     total_budget: int,
     max_per_function: int,
 ) -> dict[str, int]:
-    """Uniform budget allocation: equal per function, capped at max_per_function."""
+    """Uniform budget allocation: equal per function, capped at max_per_function and total_budget."""
     if not targets or total_budget <= 0:
         return {}
 
     per_function = min(max_per_function, max(1, total_budget // len(targets)))
-    return {t.function_name: per_function for t in targets}
+    alloc: dict[str, int] = {}
+    remaining = total_budget
+    for t in targets:
+        n = min(per_function, remaining)
+        if n <= 0:
+            break
+        alloc[f"{t.file_path}::{t.function_name}"] = n
+        remaining -= n
+    return alloc

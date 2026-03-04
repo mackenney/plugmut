@@ -25,6 +25,7 @@ from mutmut.node_mutation import OPERATORS_TYPE
 from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.config import load_config
+from mutmut_llm.operators import _reset_cache_index
 from mutmut_llm.operators import operator_llm
 from mutmut_llm.reporting import format_run_summary
 from mutmut_llm.storage import MutantResult
@@ -54,7 +55,11 @@ def _extract_function_name(mutant_name: str) -> str:
     _, _, base = base.rpartition(".")
 
     if CLASS_NAME_SEPARATOR in base:
-        return base[base.rindex(CLASS_NAME_SEPARATOR) + 1 :]
+        parts = base.split(CLASS_NAME_SEPARATOR)
+        # Format: "x", "ClassName", "method" — return "ClassName.method"
+        class_name = parts[-2]
+        method_name = parts[-1]
+        return f"{class_name}.{method_name}"
 
     if base.startswith("x_"):
         return base[2:]
@@ -73,6 +78,8 @@ def _llm_mutation_count_by_function() -> dict[str, int]:
 @hookimpl
 def mutmut_configure(config: object) -> None:
     global _llm_config, _mutmut_paths, _current_run
+    _llm_mutant_names.clear()
+    _reset_cache_index()
     _llm_config = load_config()
     if hasattr(config, "paths_to_mutate"):
         _mutmut_paths = [str(p) for p in config.paths_to_mutate]
