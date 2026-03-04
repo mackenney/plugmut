@@ -23,6 +23,9 @@ packages = ["src/mutmut_llm"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "e2e_live: tests requiring real Anthropic API access (set MUTMUT_LLM_E2E_LIVE=1)",
+]
 
 [dependency-groups]
 dev = [
