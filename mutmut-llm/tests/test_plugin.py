@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import click
 import libcst as cst
+import pytest
 
 from mutmut_llm.cache import CacheEntry
 from mutmut_llm.cache import CachedMutation
@@ -311,6 +312,7 @@ class TestMutmutPostRun:
 
         run = new_run()
         monkeypatch.setattr(mod, "_current_run", run)
+        monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: [])
 
         cache_root = tmp_path / "cache"
         monkeypatch.setattr(
@@ -327,6 +329,49 @@ class TestMutmutPostRun:
         loaded = load_latest_run(cache_root=cache_root)
         assert loaded is not None
         assert loaded.run_id == run.run_id
+
+    def test_aggregates_cost_from_cache(self, monkeypatch, tmp_path):
+        import mutmut_llm.plugin as mod
+        from mutmut_llm import storage
+
+        run = new_run()
+        monkeypatch.setattr(mod, "_current_run", run)
+
+        cache_entries = [
+            CacheEntry(
+                function_name="f1",
+                file_path="a.py",
+                source_hash="h1",
+                mutations=[],
+                cost_usd=0.01,
+                input_tokens=1000,
+                output_tokens=500,
+            ),
+            CacheEntry(
+                function_name="f2",
+                file_path="b.py",
+                source_hash="h2",
+                mutations=[],
+                cost_usd=0.02,
+                input_tokens=2000,
+                output_tokens=1000,
+            ),
+        ]
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
+        )
+
+        cache_root = tmp_path / "cache"
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.save_run",
+            lambda r: storage.save_run(r, cache_root=cache_root),
+        )
+
+        mutmut_post_run(source_file_mutation_data=[])
+
+        assert run.total_llm_cost_usd == pytest.approx(0.03)
+        assert run.total_input_tokens == 3000
+        assert run.total_output_tokens == 1500
 
     def test_no_run_does_not_crash(self, monkeypatch):
         import mutmut_llm.plugin as mod

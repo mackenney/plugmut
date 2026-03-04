@@ -5,6 +5,7 @@ No external dependencies — plain string formatting only.
 
 from __future__ import annotations
 
+from .pricing import format_cost
 from .storage import RunResult
 
 
@@ -64,7 +65,11 @@ def format_run_summary(run: RunResult) -> str:
     if timeout:
         parts.append(f"Timeout: {timeout}")
     parts.append(f"Kill rate: {kill_rate:.1f}%")
-    parts.append(f"LLM: {llm_count}, Builtin: {builtin_count}")
+
+    llm_label = f"LLM: {llm_count}"
+    if run.total_llm_cost_usd > 0:
+        llm_label += f" ({format_cost(run.total_llm_cost_usd)})"
+    parts.append(f"{llm_label}, Builtin: {builtin_count}")
 
     return " | ".join(parts)
 

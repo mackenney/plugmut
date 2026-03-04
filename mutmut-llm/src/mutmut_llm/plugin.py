@@ -25,6 +25,7 @@ from mutmut.node_mutation import OPERATORS_TYPE
 from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.config import load_config
+from mutmut_llm.pricing import format_cost
 from mutmut_llm.operators import _reset_cache_index
 from mutmut_llm.operators import operator_llm
 from mutmut_llm.reporting import format_run_summary
@@ -143,6 +144,12 @@ def mutmut_post_run(source_file_mutation_data: Sequence) -> None:
     if _current_run is None:
         return
     _current_run.completed_at = datetime.now(timezone.utc).isoformat()
+
+    entries = list_cache_entries()
+    _current_run.total_llm_cost_usd = sum(e.cost_usd for e in entries)
+    _current_run.total_input_tokens = sum(e.input_tokens for e in entries)
+    _current_run.total_output_tokens = sum(e.output_tokens for e in entries)
+
     save_run(_current_run)
 
 
@@ -169,8 +176,13 @@ def mutmut_register_commands(cli_group: object) -> None:
 
         entries = list_cache_entries()
         total_mutations = sum(len(e.mutations) for e in entries)
+        total_cost = sum(e.cost_usd for e in entries)
         click.echo(f"LLM config: enabled={config.enabled}, model={config.model}")
         click.echo(f"Cache: {len(entries)} functions, {total_mutations} mutations")
+        if total_cost > 0:
+            avg = total_cost / len(entries) if entries else 0
+            click.echo(f"Total generation cost: {format_cost(total_cost)}")
+            click.echo(f"Average cost per function: {format_cost(avg)}")
 
         latest = load_latest_run()
         if latest:

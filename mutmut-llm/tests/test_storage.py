@@ -135,7 +135,45 @@ class TestNewRun:
         assert run.started_at is not None
         assert run.completed_at is None
         assert run.results == []
+        assert run.total_llm_cost_usd == 0.0
+        assert run.total_input_tokens == 0
+        assert run.total_output_tokens == 0
 
     def test_unique_ids(self):
         ids = {new_run().run_id for _ in range(20)}
         assert len(ids) == 20
+
+
+class TestCostFields:
+    def test_round_trip_with_cost(self, cache_root):
+        run = RunResult(
+            run_id="cost1",
+            started_at="2026-01-01T00:00:00+00:00",
+            total_llm_cost_usd=0.0345,
+            total_input_tokens=5000,
+            total_output_tokens=2500,
+        )
+        save_run(run, cache_root=cache_root)
+        loaded = load_run("cost1", cache_root=cache_root)
+        assert loaded.total_llm_cost_usd == 0.0345
+        assert loaded.total_input_tokens == 5000
+        assert loaded.total_output_tokens == 2500
+
+    def test_old_format_without_cost_loads(self, cache_root):
+        import json
+
+        runs_dir = cache_root / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        old_data = {
+            "run_id": "old1",
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "completed_at": None,
+            "results": [],
+        }
+        (runs_dir / "old1.json").write_text(json.dumps(old_data))
+
+        loaded = load_run("old1", cache_root=cache_root)
+        assert loaded is not None
+        assert loaded.total_llm_cost_usd == 0.0
+        assert loaded.total_input_tokens == 0
+        assert loaded.total_output_tokens == 0

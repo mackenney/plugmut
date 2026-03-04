@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import warnings
+from dataclasses import dataclass
+from datetime import datetime
+from datetime import timezone
 from typing import TYPE_CHECKING
 
 import click
@@ -15,12 +18,21 @@ from mutmut_llm.cache import (
     write_cache_entry,
 )
 from mutmut_llm.config import LLMConfig
+from mutmut_llm.pricing import calculate_cost
 from mutmut_llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
 from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@dataclass
+class GenerationResult:
+    mutations: list[dict]
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 def run_generation(
@@ -81,6 +93,7 @@ def _generate_mutations(
     client = anthropic.Anthropic(api_key=config.api_key)
     api_calls = 0
     total_mutations = 0
+    total_cost = 0.0
     cache_kwargs = {"base_dir": base_dir} if base_dir else {}
 
     for target in targets:
@@ -104,9 +117,10 @@ def _generate_mutations(
         )
         click.echo(f"  {target.file_path}::{target.function_name} — generating...")
 
-        mutations = _call_llm_and_validate(client, config, target, max_mutations)
+        result = _call_llm_and_validate(client, config, target, max_mutations)
         api_calls += 1
-        total_mutations += len(mutations)
+        total_mutations += len(result.mutations)
+        total_cost += result.cost_usd
 
         entry = CacheEntry(
             function_name=target.function_name,
@@ -116,13 +130,22 @@ def _generate_mutations(
                 CachedMutation(
                     mutated_code=m["mutated_code"], description=m.get("description", "")
                 )
-                for m in mutations
+                for m in result.mutations
             ],
             model=config.model,
+            cost_usd=result.cost_usd,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            generated_at=datetime.now(timezone.utc).isoformat(),
         )
         write_cache_entry(entry, **cache_kwargs)
 
-    click.echo(f"\nDone. {api_calls} API calls, {total_mutations} mutations generated.")
+    from mutmut_llm.pricing import format_cost
+
+    cost_str = f" ({format_cost(total_cost)})" if total_cost > 0 else ""
+    click.echo(
+        f"\nDone. {api_calls} API calls, {total_mutations} mutations generated.{cost_str}"
+    )
     return api_calls
 
 
@@ -131,7 +154,7 @@ def _call_llm_and_validate(
     config: LLMConfig,
     target: ScopeTarget,
     max_mutations: int,
-) -> list[dict]:
+) -> GenerationResult:
     """Call LLM API, parse response, validate each mutation."""
     user_prompt = build_user_prompt(
         function_source=target.source,
@@ -150,7 +173,15 @@ def _call_llm_and_validate(
         warnings.warn(
             f"LLM API call failed for {target.function_name}: {e}", stacklevel=2
         )
-        return []
+        return GenerationResult(mutations=[])
+
+    input_tokens = (
+        getattr(response.usage, "input_tokens", 0) if hasattr(response, "usage") else 0
+    )
+    output_tokens = (
+        getattr(response.usage, "output_tokens", 0) if hasattr(response, "usage") else 0
+    )
+    cost_usd = calculate_cost(config.model, input_tokens, output_tokens)
 
     if response.stop_reason == "max_tokens":
         warnings.warn(
@@ -172,4 +203,9 @@ def _call_llm_and_validate(
         else:
             valid.append(m)
 
-    return valid
+    return GenerationResult(
+        mutations=valid,
+        cost_usd=cost_usd,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )

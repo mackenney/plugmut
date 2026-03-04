@@ -9,7 +9,7 @@ import pytest
 
 from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.config import LLMConfig
-from mutmut_llm.pipeline import _call_llm_and_validate, run_generation
+from mutmut_llm.pipeline import GenerationResult, _call_llm_and_validate, run_generation
 from mutmut_llm.scope import ScopeTarget
 
 
@@ -160,8 +160,9 @@ class TestCallLlmAndValidate:
 
         config = _config()
         result = _call_llm_and_validate(mock_client, config, target, max_mutations=3)
-        assert len(result) == 1
-        assert result[0]["mutated_code"] == "def f(x):\n    return x - 1"
+        assert isinstance(result, GenerationResult)
+        assert len(result.mutations) == 1
+        assert result.mutations[0]["mutated_code"] == "def f(x):\n    return x - 1"
 
     def test_syntax_errors_rejected(self, capsys):
         target = ScopeTarget(
@@ -177,7 +178,7 @@ class TestCallLlmAndValidate:
         mock_client.messages.create.return_value = _make_mock_response(mutations)
 
         result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
-        assert len(result) == 1
+        assert len(result.mutations) == 1
         output = capsys.readouterr().out
         assert "Rejected" in output
 
@@ -197,7 +198,7 @@ class TestCallLlmAndValidate:
         mock_client.messages.create.return_value = _make_mock_response(mutations)
 
         result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
-        assert len(result) == 0
+        assert len(result.mutations) == 0
         assert "Rejected" in capsys.readouterr().out
 
     def test_api_failure_returns_empty(self):
@@ -211,7 +212,8 @@ class TestCallLlmAndValidate:
             result = _call_llm_and_validate(
                 mock_client, _config(), target, max_mutations=3
             )
-        assert result == []
+        assert result.mutations == []
+        assert result.cost_usd == 0.0
 
     def test_truncated_response_warns(self):
         target = ScopeTarget(
@@ -239,4 +241,60 @@ class TestCallLlmAndValidate:
         mock_client.messages.create.return_value = response
 
         result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
-        assert result == []
+        assert result.mutations == []
+
+
+class TestCostTracking:
+    def test_cost_captured_from_usage(self):
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "negate"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+        assert result.input_tokens == 100
+        assert result.output_tokens == 200
+        assert result.cost_usd > 0
+
+    def test_api_failure_has_zero_cost(self):
+        target = ScopeTarget(
+            file_path="test.py", function_name="f", source="def f(): pass"
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = Exception("fail")
+
+        with pytest.warns(UserWarning):
+            result = _call_llm_and_validate(
+                mock_client, _config(), target, max_mutations=3
+            )
+        assert result.cost_usd == 0.0
+        assert result.input_tokens == 0
+        assert result.output_tokens == 0
+
+    @patch("anthropic.Anthropic")
+    def test_cost_stored_in_cache_entry(self, MockAnthropic, sample_project):
+        tmp_path, src = sample_project
+        config = _config()
+
+        mutations = [
+            {
+                "mutated_code": "def greet(name):\n    return f'Goodbye, {name}!'",
+                "description": "swap greeting",
+            },
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+        MockAnthropic.return_value = mock_client
+
+        run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
+
+        entries = list_cache_entries(base_dir=tmp_path)
+        assert any(e.cost_usd > 0 for e in entries)
+        assert any(e.input_tokens > 0 for e in entries)
+        assert any(e.generated_at != "" for e in entries)

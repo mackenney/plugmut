@@ -30,6 +30,9 @@ class RunResult:
     started_at: str
     completed_at: str | None = None
     results: list[MutantResult] = field(default_factory=list)
+    total_llm_cost_usd: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
 
 def _runs_dir(cache_root: Path | None = None) -> Path:
@@ -46,6 +49,20 @@ def save_run(run: RunResult, cache_root: Path | None = None) -> Path:
     return path
 
 
+def _run_from_dict(data: dict) -> RunResult:
+    """Deserialize a RunResult from a dict, tolerating missing cost fields."""
+    results = [MutantResult(**r) for r in data.get("results", [])]
+    return RunResult(
+        run_id=data["run_id"],
+        started_at=data["started_at"],
+        completed_at=data.get("completed_at"),
+        results=results,
+        total_llm_cost_usd=data.get("total_llm_cost_usd", 0.0),
+        total_input_tokens=data.get("total_input_tokens", 0),
+        total_output_tokens=data.get("total_output_tokens", 0),
+    )
+
+
 def load_run(run_id: str, cache_root: Path | None = None) -> RunResult | None:
     """Load a run by ID. Returns None if not found."""
     path = _runs_dir(cache_root) / f"{run_id}.json"
@@ -53,8 +70,7 @@ def load_run(run_id: str, cache_root: Path | None = None) -> RunResult | None:
         return None
     try:
         data = json.loads(path.read_text())
-        data["results"] = [MutantResult(**r) for r in data["results"]]
-        return RunResult(**data)
+        return _run_from_dict(data)
     except (json.JSONDecodeError, KeyError):
         return None
 
@@ -68,8 +84,7 @@ def list_runs(cache_root: Path | None = None) -> list[RunResult]:
     for p in d.glob("*.json"):
         try:
             data = json.loads(p.read_text())
-            data["results"] = [MutantResult(**r) for r in data["results"]]
-            runs.append(RunResult(**data))
+            runs.append(_run_from_dict(data))
         except (json.JSONDecodeError, KeyError):
             continue
     runs.sort(key=lambda r: r.started_at, reverse=True)

@@ -265,6 +265,10 @@ class TestCacheEntrySerialization:
         }
         entry = CacheEntry.from_dict(data)
         assert entry.model == ""
+        assert entry.cost_usd == 0.0
+        assert entry.input_tokens == 0
+        assert entry.output_tokens == 0
+        assert entry.generated_at == ""
 
     def test_json_serializable(self):
         entry = _make_entry()
@@ -272,3 +276,49 @@ class TestCacheEntrySerialization:
         data = json.loads(json_str)
         restored = CacheEntry.from_dict(data)
         assert restored.function_name == entry.function_name
+
+    def test_cost_fields_round_trip(self):
+        entry = CacheEntry(
+            function_name="foo",
+            file_path="test.py",
+            source_hash="abc123",
+            mutations=[],
+            model="claude-sonnet-4-6",
+            cost_usd=0.0042,
+            input_tokens=1500,
+            output_tokens=800,
+            generated_at="2026-03-04T12:00:00+00:00",
+        )
+        d = entry.to_dict()
+        assert d["cost_usd"] == 0.0042
+        assert d["input_tokens"] == 1500
+        assert d["output_tokens"] == 800
+        assert d["generated_at"] == "2026-03-04T12:00:00+00:00"
+
+        restored = CacheEntry.from_dict(d)
+        assert restored.cost_usd == entry.cost_usd
+        assert restored.input_tokens == entry.input_tokens
+        assert restored.output_tokens == entry.output_tokens
+        assert restored.generated_at == entry.generated_at
+
+    def test_cost_fields_persisted_to_disk(self, tmp_path):
+        entry = CacheEntry(
+            function_name="bar",
+            file_path="bar.py",
+            source_hash=source_hash("def bar(): pass"),
+            mutations=[],
+            model="claude-sonnet-4-6",
+            cost_usd=0.015,
+            input_tokens=2000,
+            output_tokens=1000,
+            generated_at="2026-03-04T12:00:00+00:00",
+        )
+        write_cache_entry(entry, base_dir=tmp_path)
+        loaded = read_cache_entry(
+            entry.file_path, entry.function_name, entry.source_hash, base_dir=tmp_path
+        )
+        assert loaded is not None
+        assert loaded.cost_usd == 0.015
+        assert loaded.input_tokens == 2000
+        assert loaded.output_tokens == 1000
+        assert loaded.generated_at == "2026-03-04T12:00:00+00:00"

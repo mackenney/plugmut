@@ -28,6 +28,10 @@ class CacheEntry:
     source_hash: str
     mutations: list[CachedMutation]
     model: str = ""
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    generated_at: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -36,6 +40,10 @@ class CacheEntry:
             "source_hash": self.source_hash,
             "mutations": [asdict(m) for m in self.mutations],
             "model": self.model,
+            "cost_usd": self.cost_usd,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "generated_at": self.generated_at,
         }
 
     @classmethod
@@ -47,6 +55,10 @@ class CacheEntry:
             source_hash=data["source_hash"],
             mutations=mutations,
             model=data.get("model", ""),
+            cost_usd=data.get("cost_usd", 0.0),
+            input_tokens=data.get("input_tokens", 0),
+            output_tokens=data.get("output_tokens", 0),
+            generated_at=data.get("generated_at", ""),
         )
 
 

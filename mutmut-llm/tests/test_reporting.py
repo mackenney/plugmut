@@ -180,3 +180,39 @@ class TestFormatRunTable:
         )
         table = format_run_table(run)
         assert "builtin" in table
+
+
+class TestCostInSummary:
+    def test_summary_with_cost(self):
+        run = RunResult(
+            run_id="r1",
+            started_at="2026-01-01T00:00:00+00:00",
+            results=[
+                _result("a__mutmut_1", "killed", is_llm=True),
+            ],
+            total_llm_cost_usd=0.0234,
+        )
+        summary = format_run_summary(run)
+        assert "$0.02" in summary
+
+    def test_summary_without_cost(self):
+        run = RunResult(
+            run_id="r2",
+            started_at="2026-01-01T00:00:00+00:00",
+            results=[
+                _result("a__mutmut_1", "killed", is_llm=True),
+            ],
+            total_llm_cost_usd=0.0,
+        )
+        summary = format_run_summary(run)
+        assert "$" not in summary
+
+    def test_summary_small_cost(self):
+        run = RunResult(
+            run_id="r3",
+            started_at="2026-01-01T00:00:00+00:00",
+            results=[_result("a__mutmut_1", "killed", is_llm=True)],
+            total_llm_cost_usd=0.00005,
+        )
+        summary = format_run_summary(run)
+        assert "<$0.001" in summary
