@@ -7,13 +7,15 @@ dependencies = [
     "mutmut",
     "mutmut-extras",
     "mutmut-llm",
+    "mutmut-dedup",
 ]
 
 [tool.uv.sources]
 mutmut = { workspace = true }
 mutmut-extras = { workspace = true }
 mutmut-llm = { workspace = true }
+mutmut-dedup = { workspace = true }
 
 [tool.uv.workspace]
-members = ["mutmut", "mutmut-extras", "mutmut-llm"]
+members = ["mutmut", "mutmut-extras", "mutmut-llm", "mutmut-dedup"]
 exclude = ["mutmut/e2e_projects/*"]
