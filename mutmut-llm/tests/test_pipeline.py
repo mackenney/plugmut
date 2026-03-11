@@ -14,7 +14,10 @@ from mutmut_llm.scope import ScopeTarget
 
 
 def _make_mock_response(
-    mutations: list[dict], stop_reason: str = "end_turn"
+    mutations: list[dict],
+    stop_reason: str = "end_turn",
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
 ) -> MagicMock:
     """Create a mock Anthropic API response."""
     text_block = MagicMock()
@@ -22,7 +25,12 @@ def _make_mock_response(
     response = MagicMock()
     response.content = [text_block]
     response.stop_reason = stop_reason
-    response.usage = MagicMock(input_tokens=100, output_tokens=200)
+    response.usage = MagicMock(
+        input_tokens=100,
+        output_tokens=200,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+    )
     return response
 
 
@@ -298,3 +306,126 @@ class TestCostTracking:
         assert any(e.cost_usd > 0 for e in entries)
         assert any(e.input_tokens > 0 for e in entries)
         assert any(e.generated_at != "" for e in entries)
+
+
+class TestPromptCaching:
+    def test_api_call_uses_system_blocks(self):
+        """API call must pass list-of-dicts system parameter, not plain string."""
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+            context="import math",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "negate"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+
+        call_kwargs = mock_client.messages.create.call_args[1]
+        system_arg = call_kwargs["system"]
+        assert isinstance(system_arg, list)
+        assert all(isinstance(block, dict) for block in system_arg)
+        assert system_arg[-1].get("cache_control") == {"type": "ephemeral"}
+
+    def test_user_prompt_excludes_context(self):
+        """User prompt no longer includes file context (moved to system blocks)."""
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+            context="import math",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "negate"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+
+        call_kwargs = mock_client.messages.create.call_args[1]
+        user_content = call_kwargs["messages"][0]["content"]
+        assert "File context" not in user_content
+        assert "import math" not in user_content
+
+    def test_cache_metrics_extracted_from_response(self):
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "negate"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(
+            mutations, cache_creation_input_tokens=500, cache_read_input_tokens=300
+        )
+
+        result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+        assert result.cache_creation_tokens == 500
+        assert result.cache_read_tokens == 300
+
+    def test_targets_sorted_by_file_path(self):
+        """Verify _generate_mutations processes targets sorted by file_path."""
+        from mutmut_llm.pipeline import _generate_mutations
+
+        targets = [
+            ScopeTarget(file_path="z_file.py", function_name="z", source="def z(): pass\n"),
+            ScopeTarget(file_path="a_file.py", function_name="a", source="def a(): pass\n"),
+            ScopeTarget(file_path="m_file.py", function_name="m", source="def m(): pass\n"),
+        ]
+        budget_per_target = {
+            "z_file.py::z": 3,
+            "a_file.py::a": 3,
+            "m_file.py::m": 3,
+        }
+
+        call_order: list[str] = []
+        mutations = [{"mutated_code": "def x(): return 1", "description": "d"}]
+
+        original_call = _call_llm_and_validate
+
+        def tracking_call(client, config, target, max_mutations):
+            call_order.append(target.file_path)
+            return GenerationResult(mutations=[], cost_usd=0.0)
+
+        with patch("mutmut_llm.pipeline._call_llm_and_validate", side_effect=tracking_call):
+            with patch("mutmut_llm.pipeline.anthropic", create=True):
+                mock_anthropic = MagicMock()
+                with patch("mutmut_llm.pipeline.anthropic.Anthropic", return_value=MagicMock()):
+                    pass
+
+        call_order_direct: list[str] = []
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        with patch("anthropic.Anthropic", return_value=mock_client):
+            config = _config()
+            _generate_mutations(config, targets, budget_per_target, total_budget=10, base_dir=None)
+
+        calls = mock_client.messages.create.call_args_list
+        assert len(calls) == 3
+        system_texts = []
+        for call in calls:
+            kwargs = call[1]
+            user_msg = kwargs["messages"][0]["content"]
+            system_texts.append(user_msg)
+
+        assert "def a" in system_texts[0]
+        assert "def m" in system_texts[1]
+        assert "def z" in system_texts[2]
+
+    def test_generation_result_has_cache_fields(self):
+        result = GenerationResult(
+            mutations=[],
+            cache_creation_tokens=100,
+            cache_read_tokens=200,
+        )
+        assert result.cache_creation_tokens == 100
+        assert result.cache_read_tokens == 200

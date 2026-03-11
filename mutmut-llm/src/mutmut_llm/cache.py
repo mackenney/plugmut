@@ -31,6 +31,8 @@ class CacheEntry:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     generated_at: str = ""
 
     def to_dict(self) -> dict:
@@ -43,6 +45,8 @@ class CacheEntry:
             "cost_usd": self.cost_usd,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
             "generated_at": self.generated_at,
         }
 
@@ -58,6 +62,8 @@ class CacheEntry:
             cost_usd=data.get("cost_usd", 0.0),
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
+            cache_creation_tokens=data.get("cache_creation_tokens", 0),
+            cache_read_tokens=data.get("cache_read_tokens", 0),
             generated_at=data.get("generated_at", ""),
         )
 

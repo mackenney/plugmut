@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from mutmut_llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
+from mutmut_llm.prompts import SYSTEM_PROMPT
+from mutmut_llm.prompts import build_system_with_context
+from mutmut_llm.prompts import build_user_prompt
+from mutmut_llm.prompts import parse_llm_response
 
 
 class TestSystemPrompt:
@@ -42,15 +45,50 @@ class TestBuildUserPrompt:
         prompt = build_user_prompt(self.SAMPLE_FUNC)
         assert "File context" not in prompt
 
-    def test_with_context(self):
+    def test_context_ignored_in_user_prompt(self):
+        """Context param is accepted but ignored — it goes to system blocks now."""
         ctx = "import math"
         prompt = build_user_prompt(self.SAMPLE_FUNC, context=ctx)
-        assert "File context" in prompt
-        assert ctx in prompt
+        assert "File context" not in prompt
+        assert ctx not in prompt
 
     def test_empty_context_is_omitted(self):
         prompt = build_user_prompt(self.SAMPLE_FUNC, context="")
         assert "File context" not in prompt
+
+
+class TestBuildSystemWithContext:
+    def test_empty_context_single_block(self):
+        blocks = build_system_with_context("")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "text"
+        assert SYSTEM_PROMPT in blocks[0]["text"]
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_with_context_two_blocks(self):
+        blocks = build_system_with_context("import foo")
+        assert len(blocks) == 2
+        assert blocks[0]["text"] == SYSTEM_PROMPT
+        assert "cache_control" not in blocks[0]
+        assert "import foo" in blocks[1]["text"]
+        assert blocks[1]["cache_control"] == {"type": "ephemeral"}
+
+    def test_ttl_default_no_ttl_key(self):
+        blocks = build_system_with_context("import foo")
+        assert "ttl" not in blocks[1]["cache_control"]
+
+    def test_ttl_1h_included(self):
+        blocks = build_system_with_context("import foo", ttl="1h")
+        assert blocks[1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    def test_ttl_1h_empty_context(self):
+        blocks = build_system_with_context("", ttl="1h")
+        assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    def test_system_prompt_text_preserved(self):
+        """The original SYSTEM_PROMPT string is used, not modified."""
+        blocks = build_system_with_context("ctx")
+        assert blocks[0]["text"] == SYSTEM_PROMPT
 
 
 class TestParseLlmResponse:

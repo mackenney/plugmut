@@ -35,6 +35,7 @@ class LLMConfig:
     max_mutations_per_function: int = 5
     max_tokens: int = 4096
     enabled: bool = True
+    cache_ttl: str = "5m"
 
     @property
     def is_configured(self) -> bool:
@@ -88,6 +89,8 @@ def load_config(
             config.max_tokens = int(section["max_tokens"])
         if "enabled" in section:
             config.enabled = bool(section["enabled"])
+        if "cache_ttl" in section:
+            config.cache_ttl = str(section["cache_ttl"])
 
     config.api_key = env.get("ANTHROPIC_API_KEY", "")
 

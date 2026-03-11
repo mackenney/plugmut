@@ -34,6 +34,46 @@ class TestCalculateCost:
                 f"{model} output rate must be positive"
             )
 
+    def test_cache_write_charges_1_25x(self):
+        pricing = MODEL_PRICING["claude-sonnet-4-6"]
+        cost = calculate_cost(
+            "claude-sonnet-4-6", 0, 0, cache_creation_tokens=1_000_000
+        )
+        expected = 1_000_000 * pricing.cache_write_per_million / 1_000_000
+        assert cost == pytest.approx(expected)
+        assert pricing.cache_write_per_million == pytest.approx(3.0 * 1.25)
+
+    def test_cache_read_charges_0_10x(self):
+        pricing = MODEL_PRICING["claude-sonnet-4-6"]
+        cost = calculate_cost(
+            "claude-sonnet-4-6", 0, 0, cache_read_tokens=1_000_000
+        )
+        expected = 1_000_000 * pricing.cache_read_per_million / 1_000_000
+        assert cost == pytest.approx(expected)
+        assert pricing.cache_read_per_million == pytest.approx(3.0 * 0.10)
+
+    def test_combined_cache_and_uncached(self):
+        cost = calculate_cost(
+            "claude-sonnet-4-6",
+            input_tokens=1000,
+            output_tokens=500,
+            cache_creation_tokens=2000,
+            cache_read_tokens=3000,
+        )
+        p = MODEL_PRICING["claude-sonnet-4-6"]
+        expected = (
+            1000 * p.input_per_million
+            + 500 * p.output_per_million
+            + 2000 * p.cache_write_per_million
+            + 3000 * p.cache_read_per_million
+        ) / 1_000_000
+        assert cost == pytest.approx(expected)
+
+    def test_auto_derived_cache_pricing(self):
+        for _model, pricing in MODEL_PRICING.items():
+            assert pricing.cache_write_per_million == pytest.approx(pricing.input_per_million * 1.25)
+            assert pricing.cache_read_per_million == pytest.approx(pricing.input_per_million * 0.10)
+
 
 class TestFormatCost:
     def test_zero(self):
