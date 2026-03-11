@@ -106,6 +106,7 @@ class TestCleanStaleTemps:
         # Backdate mtime by 600 seconds
         old_time = time.time() - 600
         import os
+
         os.utime(old, (old_time, old_time))
 
         removed = clean_stale_temps(tmp_path, max_age_seconds=300)
@@ -124,6 +125,7 @@ class TestCleanStaleTemps:
         json_file = tmp_path / "entry.json"
         json_file.write_text("{}")
         import os
+
         old_time = time.time() - 600
         os.utime(json_file, (old_time, old_time))
 
@@ -137,6 +139,7 @@ class TestCleanStaleTemps:
 
     def test_mixed_old_and_fresh(self, tmp_path: Path) -> None:
         import os
+
         old = tmp_path / "old.tmp"
         old.write_text("x")
         os.utime(old, (time.time() - 600, time.time() - 600))

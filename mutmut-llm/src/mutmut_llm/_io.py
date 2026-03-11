@@ -11,34 +11,63 @@ from collections.abc import Generator
 from pathlib import Path
 
 
+_ATOMIC_WRITE_RETRIES = 2
+
+
 def _atomic_write(target: Path, data: str) -> None:
     """Write *data* to *target* atomically via temp-file + rename.
 
     Uses fsync before os.replace to survive power loss. The temp file
     lives in the same directory so os.replace is a same-filesystem
     rename (atomic on POSIX).
+
+    Retries once if the temp file disappears before os.replace (race
+    with clean_stale_temps deleting it).
     """
     with _file_lock(target):
-        fd, tmp_path = tempfile.mkstemp(
-            dir=target.parent,
-            suffix=".tmp",
-            prefix=target.stem + ".",
-        )
-        try:
-            with os.fdopen(fd, "w") as f:
+        for attempt in range(_ATOMIC_WRITE_RETRIES):
+            fd, tmp_path = tempfile.mkstemp(
+                dir=target.parent,
+                suffix=".tmp",
+                prefix=target.stem + ".",
+            )
+            try:
+                f = os.fdopen(fd, "w")
+            except BaseException:
+                os.close(fd)
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
+            try:
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, str(target))
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
-            raise
+            except BaseException:
+                f.close()
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
+            f.close()
+            try:
+                os.replace(tmp_path, str(target))
+                return
+            except FileNotFoundError:
+                if attempt < _ATOMIC_WRITE_RETRIES - 1:
+                    continue
+                raise
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
 
 
 @contextlib.contextmanager
 def _file_lock(path: Path) -> Generator[None, None, None]:
-    """Advisory exclusive lock scoped to *path* via a sidecar .lock file."""
+    """Advisory exclusive lock scoped to *path* via a sidecar .lock file.
+
+    NOT reentrant: each call opens a new fd, so nesting on the same path
+    from the same thread deadlocks (fcntl.flock is per-open-file-description).
+    """
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = open(lock_path, "w")  # noqa: SIM115
