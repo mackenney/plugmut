@@ -29,13 +29,23 @@ def validate_imports(mutated_code: str, original_code: str) -> str | None:
     return None
 
 
+def _has_pragma(line: str) -> bool:
+    """Detect ``# pragma: no mutate`` in *line*, case-insensitively and regardless of spacing after ``#``."""
+    stripped = line.lstrip()
+    idx = stripped.find("#")
+    if idx == -1:
+        return False
+    comment = " ".join(stripped[idx + 1 :].split()).lower()
+    return "pragma: no mutate" in comment
+
+
 def validate_pragmas(mutated_code: str, original_code: str) -> str | None:
     """Reject mutations that modify lines marked with ``# pragma: no mutate``."""
     original_lines = original_code.splitlines()
     mutated_lines = mutated_code.splitlines()
 
     pragma_lines = [
-        (i, line) for i, line in enumerate(original_lines) if "# pragma: no mutate" in line
+        (i, line) for i, line in enumerate(original_lines) if _has_pragma(line)
     ]
 
     if not pragma_lines:

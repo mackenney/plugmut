@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mutmut_llm.validation import (
     _extract_imports,
+    _has_pragma,
     validate_imports,
     validate_mutation,
     validate_pragmas,
@@ -150,7 +151,9 @@ class TestExtractImports:
 
 
 class TestValidatePragmas:
-    ORIGINAL_WITH_PRAGMA = "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x + 1"
+    ORIGINAL_WITH_PRAGMA = (
+        "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x + 1"
+    )
 
     def test_pragma_line_preserved_passes(self):
         mutated = "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x - 1"
@@ -190,3 +193,53 @@ class TestValidatePragmas:
         result = validate_mutation(mutated, self.ORIGINAL_WITH_PRAGMA)
         assert result is not None
         assert "Pragma-marked line modified" in result
+
+    def test_no_space_after_hash_detected(self):
+        original = "def f():\n    x = 1  #pragma: no mutate\n    return x"
+        mutated = "def f():\n    x = 2  #pragma: no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+    def test_uppercase_pragma_detected(self):
+        original = "def f():\n    x = 1  # PRAGMA: NO MUTATE\n    return x"
+        mutated = "def f():\n    x = 2  # PRAGMA: NO MUTATE\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+    def test_mixed_case_pragma_detected(self):
+        original = "def f():\n    x = 1  # Pragma: No Mutate\n    return x"
+        mutated = "def f():\n    x = 2  # Pragma: No Mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+    def test_extra_spaces_in_pragma_detected(self):
+        original = "def f():\n    x = 1  #  pragma:  no mutate\n    return x"
+        mutated = "def f():\n    x = 2  #  pragma:  no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+
+class TestHasPragma:
+    def test_standard_pragma(self):
+        assert _has_pragma("    x = 1  # pragma: no mutate") is True
+
+    def test_no_space_after_hash(self):
+        assert _has_pragma("    x = 1  #pragma: no mutate") is True
+
+    def test_uppercase(self):
+        assert _has_pragma("    x = 1  # PRAGMA: NO MUTATE") is True
+
+    def test_mixed_case(self):
+        assert _has_pragma("    x = 1  # Pragma: No Mutate") is True
+
+    def test_extra_spaces(self):
+        assert _has_pragma("    x = 1  #  pragma:  no mutate") is True
+
+    def test_no_pragma(self):
+        assert _has_pragma("    x = 1") is False
+
+    def test_no_comment(self):
+        assert _has_pragma("x = 1") is False
+
+    def test_pragma_with_trailing_text(self):
+        assert _has_pragma("x = 1  # pragma: no mutate -- reason") is True
