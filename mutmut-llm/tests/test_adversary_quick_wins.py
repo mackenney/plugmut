@@ -154,21 +154,17 @@ class TestTemperatureConfig:
         config = load_config(pyproject_path=toml, env={})
         assert config.temperature == 0.6
 
-    def test_no_validation_on_out_of_range_temperature(self, tmp_path):
-        """GAP: No validation that temperature is in [0.0, 1.0].
-        Anthropic API will reject temperature > 1.0, but we don't catch it early."""
+    def test_out_of_range_temperature_raises(self, tmp_path):
         toml = tmp_path / "pyproject.toml"
         toml.write_text("[tool.mutmut.llm]\ntemperature = 2.0\n")
-        config = load_config(pyproject_path=toml, env={})
-        # No error raised — the invalid value passes through silently
-        assert config.temperature == 2.0
+        with pytest.raises(ValueError, match="temperature must be in"):
+            load_config(pyproject_path=toml, env={})
 
-    def test_negative_temperature(self, tmp_path):
-        """GAP: Negative temperature is accepted without validation."""
+    def test_negative_temperature_raises(self, tmp_path):
         toml = tmp_path / "pyproject.toml"
         toml.write_text("[tool.mutmut.llm]\ntemperature = -0.5\n")
-        config = load_config(pyproject_path=toml, env={})
-        assert config.temperature == -0.5
+        with pytest.raises(ValueError, match="temperature must be in"):
+            load_config(pyproject_path=toml, env={})
 
     def test_temperature_string_coerced(self, tmp_path):
         """TOML parser returns float for 0.5 but string for "0.5" in a string field.

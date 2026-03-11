@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.config import find_pyproject
@@ -206,3 +207,33 @@ model = "model-b"
 """)
         config2 = load_config(pyproject_path=pyproject, env={})
         assert config2.model == "model-b"
+
+
+class TestTemperatureValidation:
+    def test_temperature_above_one_raises(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""\
+[tool.mutmut.llm]
+temperature = 1.5
+""")
+        with pytest.raises(ValueError, match="temperature must be in"):
+            load_config(pyproject_path=pyproject, env={})
+
+    def test_temperature_negative_raises(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""\
+[tool.mutmut.llm]
+temperature = -0.1
+""")
+        with pytest.raises(ValueError, match="temperature must be in"):
+            load_config(pyproject_path=pyproject, env={})
+
+    def test_temperature_at_boundaries_is_valid(self, tmp_path):
+        for temp in (0.0, 0.5, 1.0):
+            pyproject = tmp_path / "pyproject.toml"
+            pyproject.write_text(f"""\
+[tool.mutmut.llm]
+temperature = {temp}
+""")
+            config = load_config(pyproject_path=pyproject, env={})
+            assert config.temperature == temp

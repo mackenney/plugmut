@@ -46,7 +46,7 @@ def clamp(x, lo, hi):
 Output:
 [
   {"mutated_code": "def clamp(x, lo, hi):\\n    return max(lo, min(x, lo))", "description": "Use lo instead of hi in inner min — clamp always returns lo for values above lo"},
-  {"mutated_code": "def clamp(x, lo, hi):\\n    return min(hi, max(x, lo))", "description": "Swap max/min nesting — inverts clamping logic"}
+  {"mutated_code": "def clamp(x, lo, hi):\\n    return max(hi, min(x, lo))", "description": "Swap lo/hi in outer max — returns hi instead of clamped value when x < lo"}
 ]
 
 Examples of BAD mutations (do NOT generate these):

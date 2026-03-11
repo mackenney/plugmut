@@ -8,6 +8,7 @@ Supported pyproject.toml keys (all optional)::
     model = "claude-sonnet-4-6"
     max_mutations_per_function = 5
     max_tokens = 4096
+    temperature = 0.6
     enabled = true
 """
 
@@ -91,6 +92,9 @@ def load_config(
             config.temperature = float(section["temperature"])
         if "enabled" in section:
             config.enabled = bool(section["enabled"])
+
+    if not 0.0 <= config.temperature <= 1.0:
+        raise ValueError(f"temperature must be in [0.0, 1.0], got {config.temperature}")
 
     config.api_key = env.get("ANTHROPIC_API_KEY", "")
 
