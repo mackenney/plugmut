@@ -69,10 +69,25 @@ def _extract_function_name(mutant_name: str) -> str:
 
 
 def _llm_mutation_count_by_function() -> dict[str, int]:
-    """Count LLM mutations per function name from the cache."""
-    counts: dict[str, int] = defaultdict(int)
+    """Count LLM mutations per function name from the cache, deduplicated.
+
+    Entries sharing the same source_hash (same function body) may come from
+    different models and contain overlapping mutations. We deduplicate by
+    mutated_code within each source_hash group, matching operator_llm's behavior.
+    """
+    by_hash: dict[str, list] = defaultdict(list)
+    func_name_by_hash: dict[str, str] = {}
     for entry in list_cache_entries():
-        counts[entry.function_name] += len(entry.mutations)
+        by_hash[entry.source_hash].append(entry)
+        func_name_by_hash[entry.source_hash] = entry.function_name
+
+    counts: dict[str, int] = defaultdict(int)
+    for src_hash, entries in by_hash.items():
+        seen: set[str] = set()
+        for entry in entries:
+            for m in entry.mutations:
+                seen.add(m.mutated_code)
+        counts[func_name_by_hash[src_hash]] += len(seen)
     return counts
 
 
