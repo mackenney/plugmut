@@ -370,14 +370,20 @@ class TestPromptCaching:
         assert result.cache_creation_tokens == 500
         assert result.cache_read_tokens == 300
 
-    def test_targets_sorted_by_file_path(self):
+    def test_targets_sorted_by_file_path(self, tmp_path):
         """Verify _generate_mutations processes targets sorted by file_path."""
         from mutmut_llm.pipeline import _generate_mutations
 
         targets = [
-            ScopeTarget(file_path="z_file.py", function_name="z", source="def z(): pass\n"),
-            ScopeTarget(file_path="a_file.py", function_name="a", source="def a(): pass\n"),
-            ScopeTarget(file_path="m_file.py", function_name="m", source="def m(): pass\n"),
+            ScopeTarget(
+                file_path="z_file.py", function_name="z", source="def z(): pass\n"
+            ),
+            ScopeTarget(
+                file_path="a_file.py", function_name="a", source="def a(): pass\n"
+            ),
+            ScopeTarget(
+                file_path="m_file.py", function_name="m", source="def m(): pass\n"
+            ),
         ]
         budget_per_target = {
             "z_file.py::z": 3,
@@ -385,29 +391,16 @@ class TestPromptCaching:
             "m_file.py::m": 3,
         }
 
-        call_order: list[str] = []
         mutations = [{"mutated_code": "def x(): return 1", "description": "d"}]
-
-        original_call = _call_llm_and_validate
-
-        def tracking_call(client, config, target, max_mutations):
-            call_order.append(target.file_path)
-            return GenerationResult(mutations=[], cost_usd=0.0)
-
-        with patch("mutmut_llm.pipeline._call_llm_and_validate", side_effect=tracking_call):
-            with patch("mutmut_llm.pipeline.anthropic", create=True):
-                mock_anthropic = MagicMock()
-                with patch("mutmut_llm.pipeline.anthropic.Anthropic", return_value=MagicMock()):
-                    pass
-
-        call_order_direct: list[str] = []
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _make_mock_response(mutations)
 
         with patch("anthropic.Anthropic", return_value=mock_client):
             config = _config()
-            _generate_mutations(config, targets, budget_per_target, total_budget=10, base_dir=None)
+            _generate_mutations(
+                config, targets, budget_per_target, total_budget=10, base_dir=tmp_path
+            )
 
         calls = mock_client.messages.create.call_args_list
         assert len(calls) == 3

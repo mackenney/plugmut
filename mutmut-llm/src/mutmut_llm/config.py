@@ -28,6 +28,9 @@ else:
         import tomli as tomllib  # type: ignore[no-redef,import-not-found]
 
 
+_VALID_CACHE_TTLS = {"5m", "1h"}
+
+
 @dataclass
 class LLMConfig:
     api_key: str = field(default="", repr=False)
@@ -36,6 +39,12 @@ class LLMConfig:
     max_tokens: int = 4096
     enabled: bool = True
     cache_ttl: str = "5m"
+
+    def __post_init__(self) -> None:
+        if self.cache_ttl not in _VALID_CACHE_TTLS:
+            raise ValueError(
+                f"Invalid cache_ttl={self.cache_ttl!r}. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
+            )
 
     @property
     def is_configured(self) -> bool:
@@ -90,7 +99,12 @@ def load_config(
         if "enabled" in section:
             config.enabled = bool(section["enabled"])
         if "cache_ttl" in section:
-            config.cache_ttl = str(section["cache_ttl"])
+            ttl = str(section["cache_ttl"])
+            if ttl not in _VALID_CACHE_TTLS:
+                raise ValueError(
+                    f"Invalid cache_ttl={ttl!r} in pyproject.toml. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
+                )
+            config.cache_ttl = ttl
 
     config.api_key = env.get("ANTHROPIC_API_KEY", "")
 

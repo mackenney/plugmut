@@ -45,9 +45,7 @@ class TestCalculateCost:
 
     def test_cache_read_charges_0_10x(self):
         pricing = MODEL_PRICING["claude-sonnet-4-6"]
-        cost = calculate_cost(
-            "claude-sonnet-4-6", 0, 0, cache_read_tokens=1_000_000
-        )
+        cost = calculate_cost("claude-sonnet-4-6", 0, 0, cache_read_tokens=1_000_000)
         expected = 1_000_000 * pricing.cache_read_per_million / 1_000_000
         assert cost == pytest.approx(expected)
         assert pricing.cache_read_per_million == pytest.approx(3.0 * 0.10)
@@ -71,8 +69,12 @@ class TestCalculateCost:
 
     def test_auto_derived_cache_pricing(self):
         for _model, pricing in MODEL_PRICING.items():
-            assert pricing.cache_write_per_million == pytest.approx(pricing.input_per_million * 1.25)
-            assert pricing.cache_read_per_million == pytest.approx(pricing.input_per_million * 0.10)
+            assert pricing.cache_write_per_million == pytest.approx(
+                pricing.input_per_million * 1.25
+            )
+            assert pricing.cache_read_per_million == pytest.approx(
+                pricing.input_per_million * 0.10
+            )
 
 
 class TestFormatCost:

@@ -50,6 +50,8 @@ def build_system_with_context(context: str = "", ttl: str = "5m") -> list[dict]:
     if ttl == "1h":
         cache_control["ttl"] = "1h"
 
+    context = (context or "").strip()
+
     blocks: list[dict] = [{"type": "text", "text": SYSTEM_PROMPT}]
     if context:
         blocks.append(
