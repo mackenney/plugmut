@@ -244,6 +244,79 @@ class TestCallLlmAndValidate:
         assert result.mutations == []
 
 
+class TestMultiModelGeneration:
+    @patch("anthropic.Anthropic")
+    def test_generate_skips_cached_model(self, MockAnthropic, sample_project, capsys):
+        """Second run with same model makes zero API calls."""
+        tmp_path, src = sample_project
+        config = _config()
+
+        mutations = [
+            {
+                "mutated_code": "def greet(name):\n    return 'Hi'",
+                "description": "simplify",
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+        MockAnthropic.return_value = mock_client
+
+        run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
+        first_count = mock_client.messages.create.call_count
+
+        mock_client.messages.create.reset_mock()
+        run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
+
+        assert mock_client.messages.create.call_count == 0
+
+    @patch("anthropic.Anthropic")
+    def test_generate_runs_for_new_model(self, MockAnthropic, sample_project, capsys):
+        """Switching model generates new entries; old model's entries remain on disk."""
+        tmp_path, src = sample_project
+
+        mutations = [
+            {
+                "mutated_code": "def greet(name):\n    return 'Hi'",
+                "description": "simplify",
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+        MockAnthropic.return_value = mock_client
+
+        config_a = LLMConfig(
+            api_key="test-key",
+            enabled=True,
+            model="claude-sonnet-4-6",
+            max_mutations_per_function=3,
+        )
+        run_generation(config_a, paths=[str(src)], budget=10, base_dir=tmp_path)
+        entries_after_a = list_cache_entries(base_dir=tmp_path)
+        model_a_count = sum(
+            1 for e in entries_after_a if e.model == "claude-sonnet-4-6"
+        )
+
+        mock_client.messages.create.reset_mock()
+        config_b = LLMConfig(
+            api_key="test-key",
+            enabled=True,
+            model="claude-opus-4-6",
+            max_mutations_per_function=3,
+        )
+        run_generation(config_b, paths=[str(src)], budget=10, base_dir=tmp_path)
+
+        assert mock_client.messages.create.call_count > 0
+
+        entries_after_b = list_cache_entries(base_dir=tmp_path)
+        model_a_remaining = sum(
+            1 for e in entries_after_b if e.model == "claude-sonnet-4-6"
+        )
+        model_b_count = sum(1 for e in entries_after_b if e.model == "claude-opus-4-6")
+
+        assert model_a_remaining == model_a_count
+        assert model_b_count > 0
+
+
 class TestCostTracking:
     def test_cost_captured_from_usage(self):
         target = ScopeTarget(

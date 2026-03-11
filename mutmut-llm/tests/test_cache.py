@@ -322,3 +322,121 @@ class TestCacheEntrySerialization:
         assert loaded.input_tokens == 2000
         assert loaded.output_tokens == 1000
         assert loaded.generated_at == "2026-03-04T12:00:00+00:00"
+
+
+class TestMultiModelCache:
+    def test_multi_model_entries_coexist(self, tmp_path):
+        """Entries for the same function from different models produce separate files."""
+        source = "def foo(): return 1"
+        entry_a = _make_entry(model="claude-sonnet-4-6", source=source)
+        entry_b = _make_entry(
+            model="claude-opus-4-6",
+            source=source,
+            mutations=[
+                CachedMutation(
+                    mutated_code="def foo(): return 99", description="opus mutation"
+                )
+            ],
+        )
+
+        path_a = write_cache_entry(entry_a, base_dir=tmp_path)
+        path_b = write_cache_entry(entry_b, base_dir=tmp_path)
+
+        assert path_a != path_b
+        assert path_a.exists()
+        assert path_b.exists()
+
+        entries = list_cache_entries(base_dir=tmp_path)
+        assert len(entries) == 2
+        models = {e.model for e in entries}
+        assert models == {"claude-sonnet-4-6", "claude-opus-4-6"}
+
+    def test_read_with_model_returns_exact_match(self, tmp_path):
+        """read_cache_entry(model=X) returns only that model's entry."""
+        source = "def foo(): return 1"
+        entry = _make_entry(model="claude-sonnet-4-6", source=source)
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        loaded = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model="claude-sonnet-4-6",
+        )
+        assert loaded is not None
+        assert loaded.model == "claude-sonnet-4-6"
+
+        missing = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model="claude-opus-4-6",
+        )
+        assert missing is None
+
+    def test_read_without_model_returns_any(self, tmp_path):
+        """read_cache_entry(model=None) returns any matching entry (backwards compat)."""
+        source = "def foo(): return 1"
+        entry = _make_entry(model="claude-sonnet-4-6", source=source)
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        loaded = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model=None,
+        )
+        assert loaded is not None
+        assert loaded.model == "claude-sonnet-4-6"
+
+    def test_old_format_entries_still_readable(self, tmp_path):
+        """Old 3-segment filename entries (no model in key) are still loaded by list_cache_entries."""
+        d = tmp_path / CACHE_DIR
+        d.mkdir(parents=True)
+
+        entry_data = {
+            "function_name": "foo",
+            "file_path": "src/module.py",
+            "source_hash": "abc123deadbeef00",
+            "mutations": [
+                {"mutated_code": "def foo(): return 0", "description": "old"}
+            ],
+        }
+        old_filename = "src_module.py__foo__abc123deadbeef00.json"
+        (d / old_filename).write_text(json.dumps(entry_data))
+
+        entries = list_cache_entries(base_dir=tmp_path)
+        assert len(entries) == 1
+        assert entries[0].model == ""
+        assert entries[0].function_name == "foo"
+
+    def test_old_format_readable_via_read_cache_entry(self, tmp_path):
+        """read_cache_entry(model=None) finds old 3-segment files."""
+        entry = _make_entry(model="", source="def foo(): return 1")
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        loaded = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model=None,
+        )
+        assert loaded is not None
+        assert loaded.model == ""
+
+    def test_write_with_model_includes_model_in_filename(self, tmp_path):
+        """Filename contains model segment for entries with a model."""
+        entry = _make_entry(model="claude-sonnet-4-6")
+        path = write_cache_entry(entry, base_dir=tmp_path)
+        assert "claude-sonnet-4-6" in path.name
+
+    def test_write_without_model_uses_old_format(self, tmp_path):
+        """Entries with model="" use the 3-segment filename (backwards compat)."""
+        entry = _make_entry(model="")
+        path = write_cache_entry(entry, base_dir=tmp_path)
+        parts = path.stem.split("__")
+        assert len(parts) == 3

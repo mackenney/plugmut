@@ -13,9 +13,7 @@ import libcst as cst
 
 from mutmut_llm.cache import CacheEntry, list_cache_entries, source_hash
 
-# Lazy in-memory index keyed by source_hash.
-# The cache is append-only during a run, so no invalidation needed.
-_cache_index: dict[str, CacheEntry] | None = None
+_cache_index: dict[str, list[CacheEntry]] | None = None
 
 
 def _reset_cache_index() -> None:
@@ -24,19 +22,21 @@ def _reset_cache_index() -> None:
     _cache_index = None
 
 
-def _build_cache_index() -> dict[str, CacheEntry]:
+def _build_cache_index() -> dict[str, list[CacheEntry]]:
     """Build index from all cache entries, keyed by source_hash.
 
     source_hash is the primary key — avoids bare-vs-qualified name mismatch
     (operator sees "bar", cache may store "Foo.bar").
+    Values are lists so entries from multiple models and identical functions
+    in different files all coexist instead of overwriting each other.
     """
-    index: dict[str, CacheEntry] = {}
+    index: dict[str, list[CacheEntry]] = {}
     for entry in list_cache_entries():
-        index[entry.source_hash] = entry
+        index.setdefault(entry.source_hash, []).append(entry)
     return index
 
 
-def _get_cache_index() -> dict[str, CacheEntry]:
+def _get_cache_index() -> dict[str, list[CacheEntry]]:
     """Get or build the cache index."""
     global _cache_index
     if _cache_index is None:
@@ -47,22 +47,27 @@ def _get_cache_index() -> dict[str, CacheEntry]:
 def operator_llm(node: cst.FunctionDef) -> Iterable[cst.FunctionDef]:
     """Yield LLM-generated mutations for a function.
 
-    Looks up pre-generated mutations by source hash. Each cached mutation
-    is parsed back into a FunctionDef CST node.
+    Looks up pre-generated mutations by source hash. Merges mutations from
+    all cached models, deduplicated by mutated_code.
     """
     func_source = cst.Module(body=[node]).code
     src_hash = source_hash(func_source)
 
     index = _get_cache_index()
-    entry = index.get(src_hash)
-    if entry is None:
+    entries = index.get(src_hash, [])
+    if not entries:
         return
 
     func_name = node.name.value
-    for cached in entry.mutations:
-        mutated_node = _parse_mutation(cached.mutated_code, func_name)
-        if mutated_node is not None:
-            yield mutated_node
+    seen: set[str] = set()
+    for entry in entries:
+        for cached in entry.mutations:
+            if cached.mutated_code in seen:
+                continue
+            seen.add(cached.mutated_code)
+            mutated_node = _parse_mutation(cached.mutated_code, func_name)
+            if mutated_node is not None:
+                yield mutated_node
 
 
 def _parse_mutation(mutated_code: str, func_name: str) -> cst.FunctionDef | None:

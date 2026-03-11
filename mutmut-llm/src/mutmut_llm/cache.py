@@ -67,8 +67,11 @@ def source_hash(source: str) -> str:
     return hashlib.sha256(source.strip().encode()).hexdigest()[:16]
 
 
-def _cache_key(file_path: str, function_name: str, src_hash: str) -> str:
+def _cache_key(file_path: str, function_name: str, src_hash: str, model: str = "") -> str:
     safe_path = file_path.replace("/", "_").replace("\\", "_")
+    if model:
+        safe_model = model.replace("/", "_").replace("\\", "_")
+        return f"{safe_path}__{function_name}__{src_hash}__{safe_model}"
     return f"{safe_path}__{function_name}__{src_hash}"
 
 
@@ -81,7 +84,7 @@ def write_cache_entry(entry: CacheEntry, base_dir: Path = Path(".")) -> Path:
     d = _cache_dir(base_dir)
     d.mkdir(parents=True, exist_ok=True)
 
-    key = _cache_key(entry.file_path, entry.function_name, entry.source_hash)
+    key = _cache_key(entry.file_path, entry.function_name, entry.source_hash, entry.model)
     path = d / f"{key}.json"
     path.write_text(json.dumps(entry.to_dict(), indent=2))
     return path
@@ -92,9 +95,17 @@ def read_cache_entry(
     function_name: str,
     src_hash: str,
     base_dir: Path = Path("."),
+    model: str | None = None,
 ) -> CacheEntry | None:
-    """Read a cache entry. Returns None if not found or hash mismatch."""
-    key = _cache_key(file_path, function_name, src_hash)
+    """Read a cache entry. Returns None if not found or hash mismatch.
+
+    When *model* is provided, looks up the exact model's entry on disk.
+    When *model* is None, scans for any matching entry (backwards-compatible).
+    """
+    if model is None:
+        return _read_any_matching_entry(file_path, function_name, src_hash, base_dir)
+
+    key = _cache_key(file_path, function_name, src_hash, model)
     path = _cache_dir(base_dir) / f"{key}.json"
 
     if not path.exists():
@@ -108,6 +119,44 @@ def read_cache_entry(
         return entry
     except (json.JSONDecodeError, KeyError):
         return None
+
+
+def _read_any_matching_entry(
+    file_path: str,
+    function_name: str,
+    src_hash: str,
+    base_dir: Path,
+) -> CacheEntry | None:
+    """Scan cache directory for any entry matching (file_path, function_name, src_hash)."""
+    # Try new 4-segment and old 3-segment filenames
+    for candidate_model in ["", None]:
+        if candidate_model is not None:
+            key = _cache_key(file_path, function_name, src_hash, candidate_model)
+            path = _cache_dir(base_dir) / f"{key}.json"
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text())
+                    entry = CacheEntry.from_dict(data)
+                    if entry.source_hash == src_hash:
+                        return entry
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+    # Fall back to scanning all files for a match (covers entries from any model)
+    d = _cache_dir(base_dir)
+    if not d.exists():
+        return None
+    safe_path = file_path.replace("/", "_").replace("\\", "_")
+    prefix = f"{safe_path}__{function_name}__{src_hash}"
+    for path in sorted(d.glob(f"{prefix}*.json")):
+        try:
+            data = json.loads(path.read_text())
+            entry = CacheEntry.from_dict(data)
+            if entry.source_hash == src_hash:
+                return entry
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return None
 
 
 def list_cache_entries(base_dir: Path = Path(".")) -> list[CacheEntry]:

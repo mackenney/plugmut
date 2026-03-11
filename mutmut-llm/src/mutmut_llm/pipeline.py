@@ -103,7 +103,11 @@ def _generate_mutations(
 
         src_hash = source_hash(target.source)
         cached = read_cache_entry(
-            target.file_path, target.function_name, src_hash, **cache_kwargs
+            target.file_path,
+            target.function_name,
+            src_hash,
+            model=config.model,
+            **cache_kwargs,
         )
         if cached is not None:
             click.echo(
