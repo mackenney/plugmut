@@ -6,11 +6,13 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import click
 
+from mutmut_llm._io import clean_stale_temps
 from mutmut_llm.cache import (
+    CACHE_DIR,
     CacheEntry,
     CachedMutation,
     read_cache_entry,
@@ -22,9 +24,6 @@ from mutmut_llm.pricing import calculate_cost
 from mutmut_llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
 from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass
@@ -82,6 +81,9 @@ def _generate_mutations(
     base_dir: Path | None,
 ) -> int:
     """Call LLM for each uncached function. Returns API call count."""
+    effective_base = base_dir or Path(".")
+    clean_stale_temps(effective_base / CACHE_DIR)
+
     try:
         import anthropic
     except ImportError:
