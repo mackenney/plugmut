@@ -6,6 +6,7 @@ from mutmut_llm.validation import (
     _extract_imports,
     validate_imports,
     validate_mutation,
+    validate_pragmas,
     validate_syntax,
 )
 
@@ -146,3 +147,46 @@ class TestExtractImports:
 
     def test_multiple_names_in_single_import(self):
         assert _extract_imports("import os, sys") == {"os", "sys"}
+
+
+class TestValidatePragmas:
+    ORIGINAL_WITH_PRAGMA = "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x + 1"
+
+    def test_pragma_line_preserved_passes(self):
+        mutated = "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x - 1"
+        assert validate_pragmas(mutated, self.ORIGINAL_WITH_PRAGMA) is None
+
+    def test_pragma_line_modified_rejected(self):
+        mutated = "def f(x):\n    ignored = 999  # pragma: no mutate\n    return x + 1"
+        result = validate_pragmas(mutated, self.ORIGINAL_WITH_PRAGMA)
+        assert result is not None
+        assert "Pragma-marked line modified" in result
+
+    def test_pragma_line_removed_rejected(self):
+        mutated = "def f(x):\n    return x + 1"
+        result = validate_pragmas(mutated, self.ORIGINAL_WITH_PRAGMA)
+        assert result is not None
+        assert "Pragma-marked line modified" in result
+
+    def test_no_pragmas_passes(self):
+        original = "def f(x):\n    return x + 1"
+        mutated = "def f(x):\n    return x - 1"
+        assert validate_pragmas(mutated, original) is None
+
+    def test_all_lines_have_pragma(self):
+        original = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
+        mutated = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
+        assert validate_pragmas(mutated, original) is None
+
+    def test_all_pragma_lines_modified_rejected(self):
+        original = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
+        mutated = "x = 99  # pragma: no mutate\ny = 99  # pragma: no mutate"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+    def test_wired_into_validate_mutation(self):
+        """validate_pragmas is called by validate_mutation."""
+        mutated = "def f(x):\n    ignored = 999  # pragma: no mutate\n    return x + 1"
+        result = validate_mutation(mutated, self.ORIGINAL_WITH_PRAGMA)
+        assert result is not None
+        assert "Pragma-marked line modified" in result

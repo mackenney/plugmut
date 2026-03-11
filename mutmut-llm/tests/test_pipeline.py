@@ -228,6 +228,42 @@ class TestCallLlmAndValidate:
         with pytest.warns(UserWarning, match="truncated"):
             _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
 
+    def test_temperature_passed_to_api(self):
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "negate"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        config = _config()
+        _call_llm_and_validate(mock_client, config, target, max_mutations=3)
+
+        call_kwargs = mock_client.messages.create.call_args
+        assert call_kwargs.kwargs["temperature"] == 0.6
+
+    def test_custom_temperature_passed_to_api(self):
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "negate"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        config = LLMConfig(api_key="test-key", temperature=0.3)
+        _call_llm_and_validate(mock_client, config, target, max_mutations=3)
+
+        call_kwargs = mock_client.messages.create.call_args
+        assert call_kwargs.kwargs["temperature"] == 0.3
+
     def test_empty_response_returns_empty(self):
         target = ScopeTarget(
             file_path="test.py", function_name="f", source="def f(): pass"

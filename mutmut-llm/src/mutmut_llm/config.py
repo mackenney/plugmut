@@ -34,6 +34,7 @@ class LLMConfig:
     model: str = "claude-sonnet-4-6"
     max_mutations_per_function: int = 5
     max_tokens: int = 4096
+    temperature: float = 0.6
     enabled: bool = True
 
     @property
@@ -86,6 +87,8 @@ def load_config(
             )
         if "max_tokens" in section:
             config.max_tokens = int(section["max_tokens"])
+        if "temperature" in section:
+            config.temperature = float(section["temperature"])
         if "enabled" in section:
             config.enabled = bool(section["enabled"])
 

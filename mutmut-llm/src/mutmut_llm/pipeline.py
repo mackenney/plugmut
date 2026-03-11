@@ -166,6 +166,7 @@ def _call_llm_and_validate(
         response = client.messages.create(  # type: ignore[union-attr]
             model=config.model,
             max_tokens=config.max_tokens,
+            temperature=config.temperature,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         )

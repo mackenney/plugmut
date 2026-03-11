@@ -22,6 +22,25 @@ class TestSystemPrompt:
         for keyword in ("Arithmetic", "Comparison", "Boolean"):
             assert keyword in SYSTEM_PROMPT
 
+    def test_contains_pragma_instruction(self):
+        assert "pragma: no mutate" in SYSTEM_PROMPT
+        assert "Never move, remove, or modify pragma comments" in SYSTEM_PROMPT
+
+    def test_contains_dedup_instruction(self):
+        assert "semantically distinct" in SYSTEM_PROMPT
+
+    def test_contains_few_shot_good_examples(self):
+        assert "Examples of GOOD mutations" in SYSTEM_PROMPT
+        assert "def clamp" in SYSTEM_PROMPT
+
+    def test_contains_few_shot_bad_examples(self):
+        assert "Examples of BAD mutations" in SYSTEM_PROMPT
+        assert "equivalent" in SYSTEM_PROMPT
+
+    def test_prompt_word_count_reasonable(self):
+        word_count = len(SYSTEM_PROMPT.split())
+        assert word_count < 600, f"System prompt too long: {word_count} words"
+
 
 class TestBuildUserPrompt:
     SAMPLE_FUNC = "def add(a, b):\n    return a + b"
