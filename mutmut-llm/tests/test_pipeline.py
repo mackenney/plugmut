@@ -422,3 +422,33 @@ class TestPromptCaching:
         )
         assert result.cache_creation_tokens == 100
         assert result.cache_read_tokens == 200
+
+    @patch("anthropic.Anthropic")
+    def test_cache_hit_rate_includes_uncached_input_in_denominator(
+        self, MockAnthropic, sample_project, capsys
+    ):
+        """Cache hit % must account for uncached input_tokens, not just cache tokens."""
+        tmp_path, src = sample_project
+        config = _config()
+
+        mutations = [
+            {
+                "mutated_code": "def greet(name):\n    return f'Goodbye, {name}!'",
+                "description": "swap greeting",
+            },
+        ]
+        mock_response = _make_mock_response(
+            mutations, cache_creation_input_tokens=0, cache_read_input_tokens=400
+        )
+        mock_response.usage.input_tokens = 600
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+        MockAnthropic.return_value = mock_client
+
+        run_generation(config, paths=[str(src)], budget=1, base_dir=tmp_path)
+
+        output = capsys.readouterr().out
+        assert "Cache hit rate:" in output
+        # 2 functions but budget=1, so 1 call: 400 read / (600 input + 400 read + 0 write) = 40%
+        assert "40%" in output

@@ -100,6 +100,7 @@ def _generate_mutations(
     api_calls = 0
     total_mutations = 0
     total_cost = 0.0
+    total_input = 0
     total_cache_read = 0
     total_cache_write = 0
     cache_kwargs = {"base_dir": base_dir} if base_dir else {}
@@ -131,6 +132,7 @@ def _generate_mutations(
         api_calls += 1
         total_mutations += len(result.mutations)
         total_cost += result.cost_usd
+        total_input += result.input_tokens
         total_cache_read += result.cache_read_tokens
         total_cache_write += result.cache_creation_tokens
 
@@ -161,9 +163,9 @@ def _generate_mutations(
         f"\nDone. {api_calls} API calls, {total_mutations} mutations generated.{cost_str}"
     )
     if total_cache_read > 0:
-        total_cached_tokens = total_cache_read + total_cache_write
-        if total_cached_tokens > 0:
-            pct = total_cache_read / total_cached_tokens * 100
+        total_all_input = total_input + total_cache_read + total_cache_write
+        if total_all_input > 0:
+            pct = total_cache_read / total_all_input * 100
             click.echo(
                 f"Cache hit rate: {pct:.0f}% ({total_cache_read} tokens read from cache)"
             )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from mutmut_llm.prompts import SYSTEM_PROMPT
 from mutmut_llm.prompts import build_system_with_context
 from mutmut_llm.prompts import build_user_prompt
@@ -89,6 +91,14 @@ class TestBuildSystemWithContext:
         """The original SYSTEM_PROMPT string is used, not modified."""
         blocks = build_system_with_context("ctx")
         assert blocks[0]["text"] == SYSTEM_PROMPT
+
+    def test_invalid_ttl_raises_value_error(self):
+        with pytest.raises(ValueError, match="cache_ttl must be one of"):
+            build_system_with_context("import foo", ttl="10m")
+
+    def test_invalid_ttl_empty_string(self):
+        with pytest.raises(ValueError, match="cache_ttl must be one of"):
+            build_system_with_context("", ttl="")
 
 
 class TestParseLlmResponse:

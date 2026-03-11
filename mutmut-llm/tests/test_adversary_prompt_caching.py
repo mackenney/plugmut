@@ -384,7 +384,7 @@ class TestCacheHitLogging:
         output = capsys.readouterr().out
         assert "Cache hit rate" not in output
 
-    def test_all_cache_read_shows_100_percent(self, tmp_path, capsys):
+    def test_all_cache_read_shows_correct_percent(self, tmp_path, capsys):
         from unittest.mock import patch
 
         from mutmut_llm.pipeline import _generate_mutations
@@ -393,6 +393,7 @@ class TestCacheHitLogging:
         mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
         mock_client.messages.create.return_value = _make_mock_response(
             mutations,
+            input_tokens=0,
             cache_creation_input_tokens=0,
             cache_read_input_tokens=500,
         )
@@ -434,26 +435,23 @@ class TestCacheHitLogging:
             )
 
         output = capsys.readouterr().out
-        # 750 / (750 + 250) = 75%
-        assert "Cache hit rate: 75%" in output
+        # 750 / (100 input + 750 cache_read + 250 cache_write) = 68%
+        assert "Cache hit rate: 68%" in output
 
 
 class TestExplicitCachePricingNotOverridden:
-    """If someone constructs ModelPricing with 0.0 explicitly, __post_init__ overrides it.
-    This is a design issue — 0.0 is the sentinel AND a potentially valid value.
-    """
+    """With None sentinel, explicit 0.0 is preserved and only None triggers auto-derivation."""
 
-    def test_zero_cache_write_gets_overridden(self):
-        """Passing cache_write_per_million=0.0 explicitly triggers auto-derivation."""
+    def test_zero_cache_write_preserved(self):
+        """Passing cache_write_per_million=0.0 explicitly is no longer overridden."""
         p = ModelPricing(
             input_per_million=3.0,
             output_per_million=15.0,
             cache_write_per_million=0.0,
             cache_read_per_million=0.0,
         )
-        # Even though we explicitly passed 0.0, it gets overridden to 3.75
-        assert p.cache_write_per_million == pytest.approx(3.75)
-        assert p.cache_read_per_million == pytest.approx(0.30)
+        assert p.cache_write_per_million == 0.0
+        assert p.cache_read_per_million == 0.0
 
     def test_nonzero_cache_pricing_preserved(self):
         p = ModelPricing(

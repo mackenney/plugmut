@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from mutmut_llm.pricing import MODEL_PRICING, calculate_cost, format_cost
+from mutmut_llm.pricing import MODEL_PRICING
+from mutmut_llm.pricing import ModelPricing
+from mutmut_llm.pricing import calculate_cost
+from mutmut_llm.pricing import format_cost
 
 
 class TestCalculateCost:
@@ -75,6 +78,19 @@ class TestCalculateCost:
             assert pricing.cache_read_per_million == pytest.approx(
                 pricing.input_per_million * 0.10
             )
+
+    def test_explicit_zero_cache_pricing_not_overridden(self):
+        """Explicit 0.0 is preserved — None sentinel triggers auto-derivation, not 0.0."""
+        p = ModelPricing(
+            input_per_million=10.0, output_per_million=50.0, cache_write_per_million=0.0, cache_read_per_million=0.0
+        )
+        assert p.cache_write_per_million == 0.0
+        assert p.cache_read_per_million == 0.0
+
+    def test_none_defaults_derive_from_input(self):
+        p = ModelPricing(input_per_million=10.0, output_per_million=50.0)
+        assert p.cache_write_per_million == pytest.approx(12.5)
+        assert p.cache_read_per_million == pytest.approx(1.0)
 
 
 class TestFormatCost:
