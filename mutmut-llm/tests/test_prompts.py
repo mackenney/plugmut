@@ -92,13 +92,10 @@ class TestBuildSystemWithContext:
         blocks = build_system_with_context("ctx")
         assert blocks[0]["text"] == SYSTEM_PROMPT
 
-    def test_invalid_ttl_raises_value_error(self):
-        with pytest.raises(ValueError, match="cache_ttl must be one of"):
-            build_system_with_context("import foo", ttl="10m")
-
-    def test_invalid_ttl_empty_string(self):
-        with pytest.raises(ValueError, match="cache_ttl must be one of"):
-            build_system_with_context("", ttl="")
+    def test_unknown_ttl_no_ttl_key(self):
+        """TTL validation is in LLMConfig; build_system_with_context trusts callers."""
+        blocks = build_system_with_context("ctx", ttl="5m")
+        assert "ttl" not in blocks[-1]["cache_control"]
 
 
 class TestParseLlmResponse:

@@ -46,10 +46,6 @@ def build_system_with_context(context: str = "", ttl: str = "5m") -> list[dict]:
     Combines SYSTEM_PROMPT with file-level context so the entire
     prefix is cached across calls to functions in the same file.
     """
-    valid_ttls = {"5m", "1h"}
-    if ttl not in valid_ttls:
-        raise ValueError(f"cache_ttl must be one of {valid_ttls}, got {ttl!r}")
-
     cache_control: dict = {"type": "ephemeral"}
     if ttl == "1h":
         cache_control["ttl"] = "1h"
