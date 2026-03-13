@@ -8,21 +8,22 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
+from dataclasses import field
 
 
 @dataclass(frozen=True)
 class ModelPricing:
     input_per_million: float
     output_per_million: float
-    cache_write_per_million: float | None = None
-    cache_read_per_million: float | None = None
+    cache_write_per_million: float = field(default=0.0)
+    cache_read_per_million: float = field(default=0.0)
 
     def __post_init__(self) -> None:
-        if self.cache_write_per_million is None:
+        if self.cache_write_per_million == 0.0:
             object.__setattr__(
                 self, "cache_write_per_million", self.input_per_million * 1.25
             )
-        if self.cache_read_per_million is None:
+        if self.cache_read_per_million == 0.0:
             object.__setattr__(
                 self, "cache_read_per_million", self.input_per_million * 0.10
             )

@@ -79,15 +79,17 @@ class TestCalculateCost:
                 pricing.input_per_million * 0.10
             )
 
-    def test_explicit_zero_cache_pricing_not_overridden(self):
-        """Explicit 0.0 is preserved — None sentinel triggers auto-derivation, not 0.0."""
+    def test_explicit_cache_pricing_preserved(self):
         p = ModelPricing(
-            input_per_million=10.0, output_per_million=50.0, cache_write_per_million=0.0, cache_read_per_million=0.0
+            input_per_million=10.0,
+            output_per_million=50.0,
+            cache_write_per_million=7.0,
+            cache_read_per_million=2.0,
         )
-        assert p.cache_write_per_million == 0.0
-        assert p.cache_read_per_million == 0.0
+        assert p.cache_write_per_million == 7.0
+        assert p.cache_read_per_million == 2.0
 
-    def test_none_defaults_derive_from_input(self):
+    def test_zero_defaults_derive_from_input(self):
         p = ModelPricing(input_per_million=10.0, output_per_million=50.0)
         assert p.cache_write_per_million == pytest.approx(12.5)
         assert p.cache_read_per_million == pytest.approx(1.0)

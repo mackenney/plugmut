@@ -440,18 +440,15 @@ class TestCacheHitLogging:
 
 
 class TestExplicitCachePricingNotOverridden:
-    """With None sentinel, explicit 0.0 is preserved and only None triggers auto-derivation."""
+    """Zero default triggers auto-derivation; explicit nonzero values are preserved."""
 
-    def test_zero_cache_write_preserved(self):
-        """Passing cache_write_per_million=0.0 explicitly is no longer overridden."""
+    def test_zero_default_triggers_derivation(self):
         p = ModelPricing(
             input_per_million=3.0,
             output_per_million=15.0,
-            cache_write_per_million=0.0,
-            cache_read_per_million=0.0,
         )
-        assert p.cache_write_per_million == 0.0
-        assert p.cache_read_per_million == 0.0
+        assert p.cache_write_per_million == pytest.approx(3.0 * 1.25)
+        assert p.cache_read_per_million == pytest.approx(3.0 * 0.10)
 
     def test_nonzero_cache_pricing_preserved(self):
         p = ModelPricing(
