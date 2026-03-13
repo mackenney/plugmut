@@ -69,10 +69,37 @@ def _extract_function_name(mutant_name: str) -> str:
 
 
 def _llm_mutation_count_by_function() -> dict[str, int]:
-    """Count LLM mutations per function name from the cache."""
-    counts: dict[str, int] = defaultdict(int)
+    """Count LLM mutations per function name from the cache, deduplicated.
+
+    Entries sharing the same source_hash (same function body) may come from
+    different models and contain overlapping mutations. We deduplicate by
+    mutated_code within each (source_hash, function_name) group, matching
+    operator_llm's behavior which groups by source_hash.
+
+    Different functions that happen to share a source_hash (e.g. identical
+    bodies in different files) each get their own count. operator_llm merges
+    them by hash, so each function_name gets the full deduplicated set.
+    """
+    by_hash_and_func: dict[tuple[str, str], list[CacheEntry]] = defaultdict(list)
     for entry in list_cache_entries():
-        counts[entry.function_name] += len(entry.mutations)
+        by_hash_and_func[(entry.source_hash, entry.function_name)].append(entry)
+
+    # operator_llm deduplicates by source_hash across all function names,
+    # so each function_name with the same hash sees the same merged set.
+    deduped_by_hash: dict[str, set[str]] = defaultdict(set)
+    for (src_hash, _func_name), entries in by_hash_and_func.items():
+        for entry in entries:
+            for m in entry.mutations:
+                deduped_by_hash[src_hash].add(m.mutated_code)
+
+    counts: dict[str, int] = defaultdict(int)
+    func_names_by_hash: dict[str, set[str]] = defaultdict(set)
+    for src_hash, func_name in by_hash_and_func:
+        func_names_by_hash[src_hash].add(func_name)
+
+    for src_hash, unique_mutations in deduped_by_hash.items():
+        for func_name in func_names_by_hash[src_hash]:
+            counts[func_name] += len(unique_mutations)
     return counts
 
 
@@ -145,6 +172,10 @@ def mutmut_post_run(source_file_mutation_data: Sequence) -> None:
         return
     _current_run.completed_at = datetime.now(timezone.utc).isoformat()
 
+    # Sums across ALL cached entries regardless of model. After running with
+    # model A then B, this reports A+B total. Per-model breakdown would require
+    # filtering by the active model config, which we intentionally skip here
+    # to keep the cost field a simple cumulative metric.
     entries = list_cache_entries()
     _current_run.total_llm_cost_usd = sum(e.cost_usd for e in entries)
     _current_run.total_input_tokens = sum(e.input_tokens for e in entries)

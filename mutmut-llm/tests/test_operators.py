@@ -8,7 +8,7 @@ import libcst as cst
 import pytest
 
 from mutmut_llm.cache import CacheEntry, CachedMutation, source_hash, write_cache_entry
-from mutmut_llm.operators import _parse_mutation, operator_llm
+from mutmut_llm.operators import _parse_mutation, _reset_cache_index, operator_llm
 
 
 def _make_func_node(source: str) -> cst.FunctionDef:
@@ -189,3 +189,61 @@ class TestParseMutation:
         with pytest.warns(UserWarning, match="doesn't contain expected"):
             result = _parse_mutation("", "f")
         assert result is None
+
+
+class TestDeduplicationEdgeCases:
+    """operator_llm deduplicates by exact mutated_code string."""
+
+    def test_whitespace_only_difference_not_deduped(self, monkeypatch):
+        """Trailing newline difference = two separate mutations."""
+        source = "def foo():\n    return 1\n"
+        src_h = source_hash(source)
+
+        entry_a = CacheEntry(
+            function_name="foo",
+            file_path="a.py",
+            source_hash=src_h,
+            mutations=[CachedMutation("def foo():\n    return 2\n", "with newline")],
+            model="model-a",
+        )
+        entry_b = CacheEntry(
+            function_name="foo",
+            file_path="a.py",
+            source_hash=src_h,
+            mutations=[CachedMutation("def foo():\n    return 2", "without newline")],
+            model="model-b",
+        )
+
+        monkeypatch.setattr(
+            "mutmut_llm.operators.list_cache_entries",
+            lambda: [entry_a, entry_b],
+        )
+        _reset_cache_index()
+
+        node = cst.parse_module(source).body[0]
+        results = list(operator_llm(node))
+        assert len(results) == 2
+
+    def test_identical_mutations_from_three_models_deduped(self, monkeypatch):
+        """Same mutation from 3 models yields exactly 1 result."""
+        source = "def foo():\n    return 1\n"
+        src_h = source_hash(source)
+        shared = "def foo():\n    return 2\n"
+
+        entries = [
+            CacheEntry(
+                function_name="foo",
+                file_path="a.py",
+                source_hash=src_h,
+                mutations=[CachedMutation(shared, f"from model {i}")],
+                model=f"model-{i}",
+            )
+            for i in range(3)
+        ]
+
+        monkeypatch.setattr("mutmut_llm.operators.list_cache_entries", lambda: entries)
+        _reset_cache_index()
+
+        node = cst.parse_module(source).body[0]
+        results = list(operator_llm(node))
+        assert len(results) == 1
