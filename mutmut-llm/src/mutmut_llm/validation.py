@@ -1,8 +1,9 @@
 """Lightweight validation for LLM-generated mutations.
 
-Two stages:
+Three stages:
 1. Syntax check via libcst (reject unparseable code).
 2. Import guard — reject mutations that introduce new imports.
+3. Pragma guard — reject mutations that modify ``# pragma: no mutate`` lines.
 """
 
 from __future__ import annotations
