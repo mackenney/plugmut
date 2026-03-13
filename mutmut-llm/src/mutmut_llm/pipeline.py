@@ -21,7 +21,11 @@ from mutmut_llm.cache import (
 )
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.pricing import calculate_cost
-from mutmut_llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
+from mutmut_llm.prompts import (
+    build_system_with_context,
+    build_user_prompt,
+    parse_llm_response,
+)
 from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
 
@@ -32,6 +36,8 @@ class GenerationResult:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 def run_generation(
@@ -96,9 +102,14 @@ def _generate_mutations(
     api_calls = 0
     total_mutations = 0
     total_cost = 0.0
+    total_input = 0
+    total_cache_read = 0
+    total_cache_write = 0
     cache_kwargs = {"base_dir": base_dir} if base_dir else {}
 
-    for target in targets:
+    sorted_targets = sorted(targets, key=lambda t: t.file_path)
+
+    for target in sorted_targets:
         if api_calls >= total_budget:
             click.echo(f"\nBudget of {total_budget} API calls reached.")
             break
@@ -123,6 +134,9 @@ def _generate_mutations(
         api_calls += 1
         total_mutations += len(result.mutations)
         total_cost += result.cost_usd
+        total_input += result.input_tokens
+        total_cache_read += result.cache_read_tokens
+        total_cache_write += result.cache_creation_tokens
 
         entry = CacheEntry(
             function_name=target.function_name,
@@ -138,6 +152,8 @@ def _generate_mutations(
             cost_usd=result.cost_usd,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+            cache_read_tokens=result.cache_read_tokens,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
         write_cache_entry(entry, **cache_kwargs)
@@ -148,6 +164,13 @@ def _generate_mutations(
     click.echo(
         f"\nDone. {api_calls} API calls, {total_mutations} mutations generated.{cost_str}"
     )
+    if total_cache_read > 0:
+        total_all_input = total_input + total_cache_read + total_cache_write
+        if total_all_input > 0:
+            pct = total_cache_read / total_all_input * 100
+            click.echo(
+                f"Cache hit rate: {pct:.0f}% ({total_cache_read} tokens read from cache)"
+            )
     return api_calls
 
 
@@ -158,10 +181,12 @@ def _call_llm_and_validate(
     max_mutations: int,
 ) -> GenerationResult:
     """Call LLM API, parse response, validate each mutation."""
+    system_blocks = build_system_with_context(
+        context=target.context, ttl=config.cache_ttl
+    )
     user_prompt = build_user_prompt(
         function_source=target.source,
         max_mutations=max_mutations,
-        context=target.context,
     )
 
     try:
@@ -169,7 +194,7 @@ def _call_llm_and_validate(
             model=config.model,
             max_tokens=config.max_tokens,
             temperature=config.temperature,
-            system=SYSTEM_PROMPT,
+            system=system_blocks,
             messages=[{"role": "user", "content": user_prompt}],
         )
     except Exception as e:
@@ -178,13 +203,20 @@ def _call_llm_and_validate(
         )
         return GenerationResult(mutations=[])
 
-    input_tokens = (
-        getattr(response.usage, "input_tokens", 0) if hasattr(response, "usage") else 0
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+    cache_creation_tokens = (
+        getattr(usage, "cache_creation_input_tokens", 0) if usage else 0
     )
-    output_tokens = (
-        getattr(response.usage, "output_tokens", 0) if hasattr(response, "usage") else 0
+    cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) if usage else 0
+    cost_usd = calculate_cost(
+        config.model,
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
     )
-    cost_usd = calculate_cost(config.model, input_tokens, output_tokens)
 
     if response.stop_reason == "max_tokens":
         warnings.warn(
@@ -211,4 +243,6 @@ def _call_llm_and_validate(
         cost_usd=cost_usd,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
     )

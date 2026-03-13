@@ -6,7 +6,10 @@ import json
 
 import pytest
 
-from mutmut_llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
+from mutmut_llm.prompts import SYSTEM_PROMPT
+from mutmut_llm.prompts import build_system_with_context
+from mutmut_llm.prompts import build_user_prompt
+from mutmut_llm.prompts import parse_llm_response
 
 
 class TestSystemPrompt:
@@ -109,19 +112,96 @@ class TestBuildUserPrompt:
         prompt = build_user_prompt(self.SAMPLE_FUNC, max_mutations=3)
         assert "up to 3" in prompt
 
-    def test_without_context(self):
+    def test_no_context_in_user_prompt(self):
         prompt = build_user_prompt(self.SAMPLE_FUNC)
         assert "File context" not in prompt
 
-    def test_with_context(self):
-        ctx = "import math"
-        prompt = build_user_prompt(self.SAMPLE_FUNC, context=ctx)
-        assert "File context" in prompt
-        assert ctx in prompt
 
-    def test_empty_context_is_omitted(self):
-        prompt = build_user_prompt(self.SAMPLE_FUNC, context="")
-        assert "File context" not in prompt
+class TestSystemBlockStructure:
+    """Verify system blocks match Anthropic's expected content-block schema."""
+
+    def test_block_has_required_keys_with_context(self):
+        blocks = build_system_with_context("import os")
+        for block in blocks:
+            assert "type" in block
+            assert "text" in block
+            assert block["type"] == "text"
+
+    def test_block_has_required_keys_without_context(self):
+        blocks = build_system_with_context("")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "text"
+        assert "text" in blocks[0]
+        assert "cache_control" in blocks[0]
+
+    def test_cache_control_only_on_last_block(self):
+        blocks = build_system_with_context("import os")
+        assert "cache_control" not in blocks[0]
+        assert "cache_control" in blocks[-1]
+
+    def test_cache_control_shape(self):
+        blocks = build_system_with_context("ctx")
+        cc = blocks[-1]["cache_control"]
+        assert "type" in cc
+        assert cc["type"] == "ephemeral"
+
+    def test_no_extra_keys_in_blocks(self):
+        """Anthropic API rejects unknown keys in content blocks."""
+        blocks = build_system_with_context("ctx")
+        allowed_keys = {"type", "text", "cache_control"}
+        for block in blocks:
+            assert set(block.keys()) <= allowed_keys
+
+    def test_none_context_produces_single_block(self):
+        """None is falsy like empty string — should not crash."""
+        blocks = build_system_with_context(None)  # type: ignore[arg-type]
+        assert len(blocks) == 1
+        assert "cache_control" in blocks[0]
+
+    def test_whitespace_only_context_treated_as_empty(self):
+        """Whitespace-only context is stripped and treated as no context."""
+        blocks = build_system_with_context("   ")
+        assert len(blocks) == 1
+        assert "cache_control" in blocks[0]
+
+
+class TestBuildSystemWithContext:
+    def test_empty_context_single_block(self):
+        blocks = build_system_with_context("")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "text"
+        assert SYSTEM_PROMPT in blocks[0]["text"]
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_with_context_two_blocks(self):
+        blocks = build_system_with_context("import foo")
+        assert len(blocks) == 2
+        assert blocks[0]["text"] == SYSTEM_PROMPT
+        assert "cache_control" not in blocks[0]
+        assert "import foo" in blocks[1]["text"]
+        assert blocks[1]["cache_control"] == {"type": "ephemeral"}
+
+    def test_ttl_default_no_ttl_key(self):
+        blocks = build_system_with_context("import foo")
+        assert "ttl" not in blocks[1]["cache_control"]
+
+    def test_ttl_1h_included(self):
+        blocks = build_system_with_context("import foo", ttl="1h")
+        assert blocks[1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    def test_ttl_1h_empty_context(self):
+        blocks = build_system_with_context("", ttl="1h")
+        assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    def test_system_prompt_text_preserved(self):
+        """The original SYSTEM_PROMPT string is used, not modified."""
+        blocks = build_system_with_context("ctx")
+        assert blocks[0]["text"] == SYSTEM_PROMPT
+
+    def test_unknown_ttl_no_ttl_key(self):
+        """TTL validation is in LLMConfig; build_system_with_context trusts callers."""
+        blocks = build_system_with_context("ctx", ttl="5m")
+        assert "ttl" not in blocks[-1]["cache_control"]
 
 
 class TestParseLlmResponse:

@@ -10,6 +10,7 @@ Supported pyproject.toml keys (all optional)::
     max_tokens = 4096
     temperature = 0.6
     enabled = true
+    cache_ttl = "5m"
 """
 
 from __future__ import annotations
@@ -29,6 +30,9 @@ else:
         import tomli as tomllib  # type: ignore[no-redef,import-not-found]
 
 
+_VALID_CACHE_TTLS = {"5m", "1h"}
+
+
 @dataclass
 class LLMConfig:
     api_key: str = field(default="", repr=False)
@@ -37,6 +41,13 @@ class LLMConfig:
     max_tokens: int = 4096
     temperature: float = 0.6
     enabled: bool = True
+    cache_ttl: str = "5m"
+
+    def __post_init__(self) -> None:
+        if self.cache_ttl not in _VALID_CACHE_TTLS:
+            raise ValueError(
+                f"Invalid cache_ttl={self.cache_ttl!r}. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
+            )
 
     @property
     def is_configured(self) -> bool:
@@ -92,6 +103,13 @@ def load_config(
             config.temperature = float(section["temperature"])
         if "enabled" in section:
             config.enabled = bool(section["enabled"])
+        if "cache_ttl" in section:
+            ttl = str(section["cache_ttl"])
+            if ttl not in _VALID_CACHE_TTLS:
+                raise ValueError(
+                    f"Invalid cache_ttl={ttl!r} in pyproject.toml. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
+                )
+            config.cache_ttl = ttl
 
     if not 0.0 <= config.temperature <= 1.0:
         raise ValueError(f"temperature must be in [0.0, 1.0], got {config.temperature}")

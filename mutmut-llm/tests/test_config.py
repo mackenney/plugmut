@@ -287,3 +287,29 @@ temperature = {temp}
 """)
             config = load_config(pyproject_path=pyproject, env={})
             assert config.temperature == temp
+
+
+class TestTTLValidation:
+    def test_invalid_ttl_10m_raises(self):
+        """10m is not a valid Anthropic TTL — must raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid cache_ttl"):
+            LLMConfig(cache_ttl="10m")
+
+    def test_garbage_ttl_raises(self):
+        with pytest.raises(ValueError, match="Invalid cache_ttl"):
+            LLMConfig(cache_ttl="garbage")
+
+    def test_empty_ttl_raises(self):
+        with pytest.raises(ValueError, match="Invalid cache_ttl"):
+            LLMConfig(cache_ttl="")
+
+    def test_config_rejects_invalid_ttl(self):
+        """LLMConfig validates cache_ttl on construction."""
+        with pytest.raises(ValueError, match="Invalid cache_ttl"):
+            LLMConfig(cache_ttl="999hours")
+
+    def test_config_rejects_invalid_ttl_from_toml(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.mutmut.llm]\ncache_ttl = "10m"\n')
+        with pytest.raises(ValueError, match="Invalid cache_ttl"):
+            load_config(pyproject_path=pyproject, env={})

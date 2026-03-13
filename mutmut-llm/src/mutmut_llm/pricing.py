@@ -8,12 +8,25 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
+from dataclasses import field
 
 
 @dataclass(frozen=True)
 class ModelPricing:
     input_per_million: float
     output_per_million: float
+    cache_write_per_million: float = field(default=0.0)
+    cache_read_per_million: float = field(default=0.0)
+
+    def __post_init__(self) -> None:
+        if self.cache_write_per_million == 0.0:
+            object.__setattr__(
+                self, "cache_write_per_million", self.input_per_million * 1.25
+            )
+        if self.cache_read_per_million == 0.0:
+            object.__setattr__(
+                self, "cache_read_per_million", self.input_per_million * 0.10
+            )
 
 
 MODEL_PRICING: dict[str, ModelPricing] = {
@@ -29,8 +42,14 @@ MODEL_PRICING: dict[str, ModelPricing] = {
 _DEFAULT_PRICING_KEY = "claude-sonnet-4-6"
 
 
-def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Return USD cost for a single API call."""
+def calculate_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
+    """Return USD cost for a single API call, including prompt cache costs."""
     pricing = MODEL_PRICING.get(model)
     if pricing is None:
         warnings.warn(f"Unknown model '{model}', using Sonnet pricing", stacklevel=2)
@@ -38,6 +57,8 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return (
         input_tokens * pricing.input_per_million
         + output_tokens * pricing.output_per_million
+        + cache_creation_tokens * pricing.cache_write_per_million
+        + cache_read_tokens * pricing.cache_read_per_million
     ) / 1_000_000
 
 

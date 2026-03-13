@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,3 +33,26 @@ def _clean_cache_index():
 @pytest.fixture()
 def cache_root(tmp_path) -> Path:
     return tmp_path / "cache"
+
+
+def make_mock_response(
+    mutations: list[dict],
+    stop_reason: str = "end_turn",
+    input_tokens: int = 100,
+    output_tokens: int = 200,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+) -> MagicMock:
+    """Create a mock Anthropic API response with usage metadata."""
+    text_block = MagicMock()
+    text_block.text = json.dumps(mutations)
+    response = MagicMock()
+    response.content = [text_block]
+    response.stop_reason = stop_reason
+    response.usage = MagicMock(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+    )
+    return response

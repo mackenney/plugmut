@@ -62,17 +62,38 @@ Output ONLY the JSON array, no other text.\
 """
 
 
+def build_system_with_context(context: str = "", ttl: str = "5m") -> list[dict]:
+    """Build system blocks with cache_control on the last block.
+
+    Combines SYSTEM_PROMPT with file-level context so the entire
+    prefix is cached across calls to functions in the same file.
+    """
+    cache_control: dict = {"type": "ephemeral"}
+    if ttl == "1h":
+        cache_control["ttl"] = "1h"
+
+    context = (context or "").strip()
+
+    blocks: list[dict] = [{"type": "text", "text": SYSTEM_PROMPT}]
+    if context:
+        blocks.append(
+            {
+                "type": "text",
+                "text": f"File context (imports, class headers):\n```python\n{context}\n```",
+                "cache_control": cache_control,
+            }
+        )
+    else:
+        blocks[-1]["cache_control"] = cache_control
+    return blocks
+
+
 def build_user_prompt(
     function_source: str,
     max_mutations: int = 5,
-    context: str = "",
 ) -> str:
     """Build the user message for mutation generation."""
     parts = [f"Function to mutate:\n```python\n{function_source}\n```"]
-    if context:
-        parts.append(
-            f"\nFile context (imports, class headers):\n```python\n{context}\n```"
-        )
     parts.append(f"\nGenerate up to {max_mutations} subtle mutations.")
     return "\n".join(parts)
 
