@@ -73,7 +73,7 @@ def _cache_key(
     safe_path = file_path.replace("/", "_").replace("\\", "_")
     if model:
         safe_model = (
-            model.replace("/", "-slash-").replace("\\", "-bslash-").replace("__", "_")
+            model.replace("/", "-slash-").replace("\\", "-bslash-").replace("_", "-u-")
         )
         return f"{safe_path}__{function_name}__{src_hash}__{safe_model}"
     return f"{safe_path}__{function_name}__{src_hash}"

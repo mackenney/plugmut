@@ -440,3 +440,21 @@ class TestMultiModelCache:
         path = write_cache_entry(entry, base_dir=tmp_path)
         parts = path.stem.split("__")
         assert len(parts) == 3
+
+    def test_model_names_with_underscores_do_not_collide(self, tmp_path):
+        """Models like 'org__model' and 'org_model' must produce distinct cache keys."""
+        source = "def foo(): return 1"
+        entry_a = _make_entry(model="org__model", source=source)
+        entry_b = _make_entry(model="org_model", source=source)
+
+        path_a = write_cache_entry(entry_a, base_dir=tmp_path)
+        path_b = write_cache_entry(entry_b, base_dir=tmp_path)
+
+        assert path_a != path_b
+        assert path_a.exists()
+        assert path_b.exists()
+
+        entries = list_cache_entries(base_dir=tmp_path)
+        assert len(entries) == 2
+        models = {e.model for e in entries}
+        assert models == {"org__model", "org_model"}
