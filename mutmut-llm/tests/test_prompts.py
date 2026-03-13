@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from mutmut_llm.prompts import SYSTEM_PROMPT
 from mutmut_llm.prompts import build_system_with_context
@@ -43,19 +42,8 @@ class TestBuildUserPrompt:
         prompt = build_user_prompt(self.SAMPLE_FUNC, max_mutations=3)
         assert "up to 3" in prompt
 
-    def test_without_context(self):
+    def test_no_context_in_user_prompt(self):
         prompt = build_user_prompt(self.SAMPLE_FUNC)
-        assert "File context" not in prompt
-
-    def test_context_ignored_in_user_prompt(self):
-        """Context param is accepted but ignored — it goes to system blocks now."""
-        ctx = "import math"
-        prompt = build_user_prompt(self.SAMPLE_FUNC, context=ctx)
-        assert "File context" not in prompt
-        assert ctx not in prompt
-
-    def test_empty_context_is_omitted(self):
-        prompt = build_user_prompt(self.SAMPLE_FUNC, context="")
         assert "File context" not in prompt
 
 

@@ -69,14 +69,8 @@ def build_system_with_context(context: str = "", ttl: str = "5m") -> list[dict]:
 def build_user_prompt(
     function_source: str,
     max_mutations: int = 5,
-    context: str = "",
 ) -> str:
-    """Build the user message for mutation generation.
-
-    The *context* parameter is accepted for backward compatibility but
-    ignored — file context is now included in the system blocks via
-    ``build_system_with_context`` for prompt caching.
-    """
+    """Build the user message for mutation generation."""
     parts = [f"Function to mutate:\n```python\n{function_source}\n```"]
     parts.append(f"\nGenerate up to {max_mutations} subtle mutations.")
     return "\n".join(parts)

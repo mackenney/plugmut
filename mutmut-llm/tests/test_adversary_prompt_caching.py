@@ -290,20 +290,11 @@ class TestCacheEntryBackwardsCompat:
         assert restored.cache_read_tokens == 300
 
 
-class TestBuildUserPromptBackwardsCompat:
-    def test_context_param_silently_ignored(self):
-        """Passing context= to build_user_prompt must not include it."""
-        prompt = build_user_prompt("def f(): pass", context="import SECRET_KEY")
-        assert "SECRET_KEY" not in prompt
+class TestBuildUserPromptNoContext:
+    def test_no_context_in_user_prompt(self):
+        """User prompt contains only the function source, no file context."""
+        prompt = build_user_prompt("def f(): pass")
         assert "File context" not in prompt
-
-    def test_context_param_does_not_affect_output(self):
-        """Output identical regardless of context value."""
-        prompt_no_ctx = build_user_prompt("def f(): pass", max_mutations=3)
-        prompt_with_ctx = build_user_prompt(
-            "def f(): pass", max_mutations=3, context="import os\nimport sys"
-        )
-        assert prompt_no_ctx == prompt_with_ctx
 
 
 class TestSortStability:
