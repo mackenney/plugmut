@@ -14,7 +14,7 @@ from pathlib import Path
 _ATOMIC_WRITE_RETRIES = 2
 
 
-def _atomic_write(target: Path, data: str) -> None:
+def atomic_write(target: Path, data: str) -> None:
     """Write *data* to *target* atomically via temp-file + rename.
 
     Uses fsync before os.replace to survive power loss. The temp file
@@ -24,7 +24,7 @@ def _atomic_write(target: Path, data: str) -> None:
     Retries once if the temp file disappears before os.replace (race
     with clean_stale_temps deleting it).
     """
-    with _file_lock(target):
+    with file_lock(target):
         for attempt in range(_ATOMIC_WRITE_RETRIES):
             fd, tmp_path = tempfile.mkstemp(
                 dir=target.parent,
@@ -62,7 +62,7 @@ def _atomic_write(target: Path, data: str) -> None:
 
 
 @contextlib.contextmanager
-def _file_lock(path: Path) -> Generator[None, None, None]:
+def file_lock(path: Path) -> Generator[None, None, None]:
     """Advisory exclusive lock scoped to *path* via a sidecar .lock file.
 
     NOT reentrant: each call opens a new fd, so nesting on the same path
@@ -84,6 +84,14 @@ def clean_stale_temps(directory: Path, max_age_seconds: int = 300) -> int:
 
     Returns the number of files removed. Silently skips files that
     disappear between listing and unlinking (race with other cleaners).
+
+    Does NOT acquire file_lock before deleting. Orphaned temps have no
+    canonical target path to lock against, and truly stale temps (owner
+    crashed) have no living writer to conflict with. The 300s default
+    age threshold makes it near-impossible for a live writer's temp to
+    qualify. If a cleaner *does* race with an active writer (e.g.
+    max_age_seconds=0 in tests), atomic_write's retry loop handles the
+    vanished temp gracefully.
     """
     if not directory.exists():
         return 0

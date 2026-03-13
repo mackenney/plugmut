@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mutmut_llm._io import _atomic_write, _file_lock, clean_stale_temps
+from mutmut_llm._io import atomic_write, clean_stale_temps, file_lock
 
 
 class TestTempFileLeak:
@@ -29,7 +29,7 @@ class TestTempFileLeak:
             mock_file.write.side_effect = OSError("disk full")
             mock_file.fileno.return_value = 3
             with pytest.raises(OSError, match="disk full"):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leaked temp files: {tmp_files}"
@@ -43,7 +43,7 @@ class TestTempFileLeak:
             mock_file.flush.side_effect = OSError("flush failed")
             mock_file.fileno.return_value = 3
             with pytest.raises(OSError, match="flush failed"):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leaked temp files: {tmp_files}"
@@ -54,7 +54,7 @@ class TestTempFileLeak:
 
         with patch("mutmut_llm._io.os.fsync", side_effect=OSError("fsync failed")):
             with pytest.raises(OSError, match="fsync failed"):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leaked temp files: {tmp_files}"
@@ -65,7 +65,7 @@ class TestTempFileLeak:
 
         with patch("mutmut_llm._io.os.replace", side_effect=KeyboardInterrupt):
             with pytest.raises(KeyboardInterrupt):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leaked temp files: {tmp_files}"
@@ -76,7 +76,7 @@ class TestTempFileLeak:
 
         with patch("mutmut_llm._io.os.replace", side_effect=SystemExit(1)):
             with pytest.raises(SystemExit):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leaked temp files: {tmp_files}"
@@ -101,7 +101,7 @@ class TestFdLeakOnFdopenFailure:
             patch("mutmut_llm._io.os.close", side_effect=tracking_close),
         ):
             with pytest.raises(OSError, match="fdopen failed"):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leaked temp files: {tmp_files}"
@@ -114,10 +114,10 @@ class TestLockFileAccumulation:
     """GAP: .lock files are never cleaned up."""
 
     def test_lock_files_accumulate(self, tmp_path: Path) -> None:
-        """Each _atomic_write creates a .lock file that is never removed."""
+        """Each atomic_write creates a .lock file that is never removed."""
         for i in range(5):
             target = tmp_path / f"entry_{i}.json"
-            _atomic_write(target, f"data_{i}")
+            atomic_write(target, f"data_{i}")
 
         lock_files = list(tmp_path.glob("*.lock"))
         # This documents the behavior: lock files accumulate
@@ -126,7 +126,7 @@ class TestLockFileAccumulation:
     def test_clean_stale_temps_ignores_lock_files(self, tmp_path: Path) -> None:
         """clean_stale_temps only removes .tmp files, not .lock files."""
         target = tmp_path / "entry.json"
-        _atomic_write(target, "data")
+        atomic_write(target, "data")
 
         old_time = time.time() - 600
         for lock_file in tmp_path.glob("*.lock"):
@@ -139,24 +139,24 @@ class TestLockFileAccumulation:
 
 
 class TestNestedLockDeadlock:
-    """BUG: Nested _file_lock on same path deadlocks (different fd = different lock)."""
+    """BUG: Nested file_lock on same path deadlocks (different fd = different lock)."""
 
     def test_nested_lock_same_path_deadlocks(self, tmp_path: Path) -> None:
-        """BUG: Nested _file_lock on the same path deadlocks.
+        """BUG: Nested file_lock on the same path deadlocks.
 
-        fcntl.flock is per-open-file-description. Each _file_lock call opens a
+        fcntl.flock is per-open-file-description. Each file_lock call opens a
         new fd, so acquiring a second LOCK_EX on the same file from the same
         thread blocks forever.
 
         This test proves the deadlock exists (thread cannot complete within 2s).
-        Production code must never nest _file_lock on the same path.
+        Production code must never nest file_lock on the same path.
         """
         target = tmp_path / "f.json"
         completed = threading.Event()
 
         def nested_lock():
-            with _file_lock(target):
-                with _file_lock(target):
+            with file_lock(target):
+                with file_lock(target):
                     completed.set()
 
         t = threading.Thread(target=nested_lock, daemon=True)
@@ -169,10 +169,10 @@ class TestNestedLockDeadlock:
 
 
 class TestDirectoryCreation:
-    """Verify _atomic_write works when target.parent does not exist."""
+    """Verify atomic_write works when target.parent does not exist."""
 
     def test_parent_dir_created_by_lock(self, tmp_path: Path) -> None:
-        """_file_lock creates lock_path.parent, which is target.parent.
+        """file_lock creates lock_path.parent, which is target.parent.
 
         The existing test_creates_parent_via_lock in test_io.py manually creates
         the parent dir, defeating the purpose. This test verifies the real behavior.
@@ -180,7 +180,7 @@ class TestDirectoryCreation:
         target = tmp_path / "deep" / "nested" / "dir" / "entry.json"
         assert not target.parent.exists()
 
-        _atomic_write(target, "data")
+        atomic_write(target, "data")
 
         assert target.exists()
         assert target.read_text() == "data"
@@ -202,7 +202,7 @@ class TestCleanStaleTempsRace:
         """clean_stale_temps with max_age=0 races with active writers.
 
         clean_stale_temps does not acquire the file lock before deleting .tmp files.
-        _atomic_write retries once if its temp file disappears before os.replace,
+        atomic_write retries once if its temp file disappears before os.replace,
         so the writer survives the race.
         """
         target = tmp_path / "entry.json"
@@ -213,7 +213,7 @@ class TestCleanStaleTempsRace:
             try:
                 barrier.wait()
                 for i in range(20):
-                    _atomic_write(target, json.dumps({"i": i}))
+                    atomic_write(target, json.dumps({"i": i}))
             except Exception as e:
                 errors.append(e)
 
@@ -253,33 +253,33 @@ class TestEdgeCases:
 
     def test_empty_string_write(self, tmp_path: Path) -> None:
         target = tmp_path / "empty.json"
-        _atomic_write(target, "")
+        atomic_write(target, "")
         assert target.read_text() == ""
 
     def test_large_payload(self, tmp_path: Path) -> None:
         """Verify fsync works on large payloads."""
         target = tmp_path / "large.json"
         payload = json.dumps({"data": "x" * 10_000_000})
-        _atomic_write(target, payload)
+        atomic_write(target, payload)
         assert json.loads(target.read_text())["data"] == "x" * 10_000_000
 
     def test_unicode_content(self, tmp_path: Path) -> None:
         target = tmp_path / "unicode.json"
         payload = json.dumps({"emoji": "\U0001f600", "cjk": "\u4e16\u754c"})
-        _atomic_write(target, payload)
+        atomic_write(target, payload)
         assert json.loads(target.read_text())["emoji"] == "\U0001f600"
 
     def test_special_chars_in_filename(self, tmp_path: Path) -> None:
         """Target filename with spaces and special chars."""
         target = tmp_path / "my file (1).json"
-        _atomic_write(target, "data")
+        atomic_write(target, "data")
         assert target.read_text() == "data"
 
     def test_rapid_overwrites(self, tmp_path: Path) -> None:
         """Rapid successive writes should all produce valid results."""
         target = tmp_path / "rapid.json"
         for i in range(100):
-            _atomic_write(target, json.dumps({"i": i}))
+            atomic_write(target, json.dumps({"i": i}))
         data = json.loads(target.read_text())
         assert data["i"] == 99
 
@@ -290,7 +290,7 @@ class TestEdgeCases:
         link = tmp_path / "link.json"
         link.symlink_to(real_file)
 
-        _atomic_write(link, "via_symlink")
+        atomic_write(link, "via_symlink")
 
         # os.replace replaces the symlink itself with the temp file
         # so link is now a regular file, and real.json still has original content
@@ -307,7 +307,7 @@ class TestEdgeCases:
         ro_dir.chmod(0o444)
         try:
             with pytest.raises((OSError, PermissionError)):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
         finally:
             ro_dir.chmod(0o755)
 
@@ -327,9 +327,9 @@ class TestExistingTestGap:
     """Documents a gap in the existing test_creates_parent_via_lock test."""
 
     def test_existing_test_creates_parent_manually(self, tmp_path: Path) -> None:
-        """The existing test in test_io.py creates parent dir before calling _atomic_write.
+        """The existing test in test_io.py creates parent dir before calling atomic_write.
 
-        This means it doesn't actually test whether _file_lock creates the directory.
+        This means it doesn't actually test whether file_lock creates the directory.
         Our TestDirectoryCreation.test_parent_dir_created_by_lock tests the real behavior.
         """
         # This just documents the gap; see TestDirectoryCreation above for the real test.
@@ -339,37 +339,37 @@ class TestLockBehaviorDocumentation:
     """Tests that document lock behavior for correctness verification."""
 
     def test_lock_released_after_write(self, tmp_path: Path) -> None:
-        """After _atomic_write returns, the lock must be released."""
+        """After atomic_write returns, the lock must be released."""
         target = tmp_path / "entry.json"
-        _atomic_write(target, "first")
+        atomic_write(target, "first")
 
         # If lock is still held, this would deadlock
         acquired = threading.Event()
 
         def try_lock():
-            with _file_lock(target):
+            with file_lock(target):
                 acquired.set()
 
         t = threading.Thread(target=try_lock)
         t.start()
         t.join(timeout=2)
-        assert acquired.is_set(), "Lock was not released after _atomic_write"
+        assert acquired.is_set(), "Lock was not released after atomic_write"
 
     def test_lock_released_on_error(self, tmp_path: Path) -> None:
-        """Lock must be released even when _atomic_write raises."""
+        """Lock must be released even when atomic_write raises."""
         target = tmp_path / "entry.json"
 
         with patch("mutmut_llm._io.os.replace", side_effect=OSError("fail")):
             with pytest.raises(OSError):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         acquired = threading.Event()
 
         def try_lock():
-            with _file_lock(target):
+            with file_lock(target):
                 acquired.set()
 
         t = threading.Thread(target=try_lock)
         t.start()
         t.join(timeout=2)
-        assert acquired.is_set(), "Lock was not released after failed _atomic_write"
+        assert acquired.is_set(), "Lock was not released after failed atomic_write"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -10,21 +11,21 @@ from unittest.mock import patch
 
 import pytest
 
-from mutmut_llm._io import _atomic_write, _file_lock, clean_stale_temps
+from mutmut_llm._io import atomic_write, clean_stale_temps, file_lock
 
 
 class TestAtomicWrite:
     def test_round_trip_valid_json(self, tmp_path: Path) -> None:
         target = tmp_path / "entry.json"
         payload = {"key": "value", "nested": [1, 2, 3]}
-        _atomic_write(target, json.dumps(payload))
+        atomic_write(target, json.dumps(payload))
 
         assert target.exists()
         assert json.loads(target.read_text()) == payload
 
     def test_no_temp_file_remains_after_success(self, tmp_path: Path) -> None:
         target = tmp_path / "entry.json"
-        _atomic_write(target, "data")
+        atomic_write(target, "data")
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == []
@@ -34,7 +35,7 @@ class TestAtomicWrite:
 
         with patch("mutmut_llm._io.os.replace", side_effect=OSError("disk error")):
             with pytest.raises(OSError, match="disk error"):
-                _atomic_write(target, "data")
+                atomic_write(target, "data")
 
         assert not target.exists()
         tmp_files = list(tmp_path.glob("*.tmp"))
@@ -46,20 +47,20 @@ class TestAtomicWrite:
 
         with patch("mutmut_llm._io.os.replace", side_effect=OSError("fail")):
             with pytest.raises(OSError):
-                _atomic_write(target, "replacement")
+                atomic_write(target, "replacement")
 
         assert target.read_text() == "original"
 
     def test_overwrites_existing_file(self, tmp_path: Path) -> None:
         target = tmp_path / "entry.json"
-        _atomic_write(target, "first")
-        _atomic_write(target, "second")
+        atomic_write(target, "first")
+        atomic_write(target, "second")
         assert target.read_text() == "second"
 
     def test_creates_parent_via_lock(self, tmp_path: Path) -> None:
         target = tmp_path / "sub" / "dir" / "entry.json"
         target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(target, "data")
+        atomic_write(target, "data")
         assert target.read_text() == "data"
 
 
@@ -71,7 +72,7 @@ class TestFileLock:
 
         def writer(value: str) -> None:
             barrier.wait()
-            with _file_lock(target):
+            with file_lock(target):
                 results.append(f"{value}-start")
                 time.sleep(0.05)
                 results.append(f"{value}-end")
@@ -91,11 +92,11 @@ class TestFileLock:
         assert results[3].endswith("-end")
         assert results[2][0] == results[3][0]
 
-    def test_lock_is_reentrant_across_calls(self, tmp_path: Path) -> None:
+    def test_lock_can_be_acquired_sequentially(self, tmp_path: Path) -> None:
         target = tmp_path / "f.json"
-        with _file_lock(target):
+        with file_lock(target):
             pass
-        with _file_lock(target):
+        with file_lock(target):
             pass
 
 
@@ -105,8 +106,6 @@ class TestCleanStaleTemps:
         old.write_text("stale")
         # Backdate mtime by 600 seconds
         old_time = time.time() - 600
-        import os
-
         os.utime(old, (old_time, old_time))
 
         removed = clean_stale_temps(tmp_path, max_age_seconds=300)
@@ -124,8 +123,6 @@ class TestCleanStaleTemps:
     def test_ignores_non_tmp_files(self, tmp_path: Path) -> None:
         json_file = tmp_path / "entry.json"
         json_file.write_text("{}")
-        import os
-
         old_time = time.time() - 600
         os.utime(json_file, (old_time, old_time))
 
@@ -138,8 +135,6 @@ class TestCleanStaleTemps:
         assert removed == 0
 
     def test_mixed_old_and_fresh(self, tmp_path: Path) -> None:
-        import os
-
         old = tmp_path / "old.tmp"
         old.write_text("x")
         os.utime(old, (time.time() - 600, time.time() - 600))
@@ -163,7 +158,7 @@ class TestAtomicWriteConcurrency:
             try:
                 barrier.wait()
                 payload = json.dumps({"writer": n, "data": "x" * 1000})
-                _atomic_write(target, payload)
+                atomic_write(target, payload)
             except Exception as e:
                 errors.append(e)
 

@@ -15,7 +15,7 @@ from datetime import timezone
 from pathlib import Path
 from uuid import uuid4
 
-from mutmut_llm._io import _atomic_write
+from mutmut_llm._io import atomic_write
 
 
 @dataclass
@@ -47,7 +47,7 @@ def save_run(run: RunResult, cache_root: Path | None = None) -> Path:
     d = _runs_dir(cache_root)
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{run.run_id}.json"
-    _atomic_write(path, json.dumps(asdict(run), indent=2))
+    atomic_write(path, json.dumps(asdict(run), indent=2))
     return path
 
 
