@@ -158,7 +158,12 @@ def run_generation(
         click.echo("Error: ANTHROPIC_API_KEY not set. Set it or use --dry-run.")
         return 0
 
-    scope = resolve_scope_deep(paths, budget, config.max_mutations_per_function)
+    scope = resolve_scope_deep(
+        paths,
+        budget,
+        config.max_mutations_per_function,
+        config.min_mutations_per_function,
+    )
 
     if not scope.targets:
         click.echo("No functions found in scope.")

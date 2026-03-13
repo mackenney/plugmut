@@ -21,6 +21,7 @@ class TestDefaults:
     def test_default_config(self):
         config = load_config(pyproject_path=None, env={})
         assert config.model == "claude-sonnet-4-6"
+        assert config.min_mutations_per_function == 2
         assert config.max_mutations_per_function == 5
         assert config.max_tokens == 4096
         assert config.enabled is True
@@ -288,6 +289,27 @@ temperature = {temp}
             config = load_config(pyproject_path=pyproject, env={})
             assert config.temperature == temp
 
+
+class TestMinMutationsConfig:
+    def test_default_min_mutations(self):
+        config = LLMConfig()
+        assert config.min_mutations_per_function == 2
+
+    def test_min_mutations_from_toml(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[tool.mutmut.llm]\nmin_mutations_per_function = 3\n")
+        config = load_config(pyproject_path=pyproject, env={})
+        assert config.min_mutations_per_function == 3
+
+    def test_min_mutations_not_in_toml_uses_default(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.mutmut.llm]\nmodel = "claude-sonnet-4-6"\n')
+        config = load_config(pyproject_path=pyproject, env={})
+        assert config.min_mutations_per_function == 2
+
+    def test_min_greater_than_max_raises(self):
+        with pytest.raises(ValueError, match="min_mutations_per_function"):
+            LLMConfig(min_mutations_per_function=10, max_mutations_per_function=3)
 
 class TestTTLValidation:
     def test_invalid_ttl_10m_raises(self):

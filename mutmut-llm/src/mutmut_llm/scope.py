@@ -6,10 +6,12 @@ PR and targeted modes deferred to Step 8.
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import libcst as cst
+
 
 
 @dataclass
@@ -32,6 +34,7 @@ def resolve_scope_deep(
     paths: list[str],
     budget: int,
     max_per_function: int = 5,
+    min_per_function: int = 2,
 ) -> ScopeResult:
     """Deep mode: extract all functions from *paths* (files or directories)."""
     targets: list[ScopeTarget] = []
@@ -39,7 +42,7 @@ def resolve_scope_deep(
     for source_file in _discover_python_files(paths):
         targets.extend(_extract_functions(source_file))
 
-    alloc = _allocate_budget(targets, budget, max_per_function)
+    alloc = _allocate_budget(targets, budget, max_per_function, min_per_function)
     return ScopeResult(
         targets=targets, mode="deep", budget=budget, budget_per_target=alloc
     )
@@ -123,22 +126,79 @@ def _build_class_context(
     return f"{class_header}\n    ..."
 
 
+def _branch_count(source: str) -> int:
+    """Count branch-introducing AST nodes (excludes keywords in strings/comments)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return 0
+    count = 0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.If, ast.For, ast.While, ast.Try, ast.ExceptHandler, ast.With, ast.AsyncFor, ast.AsyncWith)):
+            count += 1
+    return count
+
+
+def compute_mutation_budget(
+    source: str, min_budget: int = 2, max_budget: int = 10
+) -> int:
+    """Scale mutation budget by function complexity (lines + branching)."""
+    lines = [
+        line
+        for line in source.strip().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    effective = max(1, len(lines) - 1)
+    base = effective // 3
+    branch_bonus = _branch_count(source) // 3
+    return min(max_budget, max(min_budget, base + branch_bonus))
+
+
 def _allocate_budget(
     targets: list[ScopeTarget],
     total_budget: int,
     max_per_function: int,
+    min_per_function: int = 2,
 ) -> dict[str, int]:
-    """Uniform budget allocation: equal per function, capped at max_per_function and total_budget."""
+    """Complexity-weighted budget allocation per function, scaled to fit total_budget."""
     if not targets or total_budget <= 0:
         return {}
 
-    per_function = min(max_per_function, max(1, total_budget // len(targets)))
+    keys = [f"{t.file_path}::{t.function_name}" for t in targets]
+    raw_budgets = [
+        compute_mutation_budget(
+            t.source, min_budget=min_per_function, max_budget=max_per_function
+        )
+        for t in targets
+    ]
+
+    total_raw = sum(raw_budgets)
+    if total_raw <= total_budget:
+        return dict(zip(keys, raw_budgets))
+
+    # Scale down proportionally, respecting total_budget hard cap
+    scale = total_budget / total_raw
+    scaled = [max(1, int(v * scale)) for v in raw_budgets]
+
+    # Trim excess by reducing largest-first until we fit
+    remaining = sum(scaled) - total_budget
+    if remaining > 0:
+        indices = sorted(range(len(scaled)), key=lambda i: scaled[i], reverse=True)
+        for i in indices:
+            if remaining <= 0:
+                break
+            if scaled[i] > 1:
+                scaled[i] -= 1
+                remaining -= 1
+
+    # If still over (all at 1), truncate to only budget-many targets
     alloc: dict[str, int] = {}
-    remaining = total_budget
-    for t in targets:
-        n = min(per_function, remaining)
-        if n <= 0:
+    budget_left = total_budget
+    for k, v in zip(keys, scaled):
+        if budget_left <= 0:
             break
-        alloc[f"{t.file_path}::{t.function_name}"] = n
-        remaining -= n
+        n = min(v, budget_left)
+        alloc[k] = n
+        budget_left -= n
+
     return alloc
