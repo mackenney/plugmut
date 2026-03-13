@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from mutmut_llm.prompts import SYSTEM_PROMPT
+from mutmut_llm.prompts import SYSTEM_PROMPT_TEMPLATE
+from mutmut_llm.prompts import _HARDCODED_EXCLUSIONS
+from mutmut_llm.prompts import _describe_operator
+from mutmut_llm.prompts import build_exclusion_list
+from mutmut_llm.prompts import build_system_prompt
 from mutmut_llm.prompts import build_system_with_context
 from mutmut_llm.prompts import build_user_prompt
 from mutmut_llm.prompts import parse_llm_response
 
+# Call at module level so all tests share the same snapshot; deterministic because
+# operator registry state is stable within a test session.
+SYSTEM_PROMPT = build_system_prompt()
 
 class TestSystemPrompt:
     def test_mentions_json_output(self):
@@ -24,8 +33,8 @@ class TestSystemPrompt:
             assert keyword in SYSTEM_PROMPT
 
     def test_forbids_trivial_mutations(self):
-        for keyword in ("Arithmetic", "Comparison", "Boolean"):
-            assert keyword in SYSTEM_PROMPT
+        assert "Do NOT generate" in SYSTEM_PROMPT
+        assert "rule-based operators" in SYSTEM_PROMPT
 
     def test_contains_pragma_instruction(self):
         assert "pragma: no mutate" in SYSTEM_PROMPT
@@ -170,13 +179,13 @@ class TestBuildSystemWithContext:
         blocks = build_system_with_context("")
         assert len(blocks) == 1
         assert blocks[0]["type"] == "text"
-        assert SYSTEM_PROMPT in blocks[0]["text"]
+        assert "mutation testing expert" in blocks[0]["text"]
         assert blocks[0]["cache_control"] == {"type": "ephemeral"}
 
     def test_with_context_two_blocks(self):
         blocks = build_system_with_context("import foo")
         assert len(blocks) == 2
-        assert blocks[0]["text"] == SYSTEM_PROMPT
+        assert "mutation testing expert" in blocks[0]["text"]
         assert "cache_control" not in blocks[0]
         assert "import foo" in blocks[1]["text"]
         assert blocks[1]["cache_control"] == {"type": "ephemeral"}
@@ -193,15 +202,198 @@ class TestBuildSystemWithContext:
         blocks = build_system_with_context("", ttl="1h")
         assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
-    def test_system_prompt_text_preserved(self):
-        """The original SYSTEM_PROMPT string is used, not modified."""
+    def test_system_prompt_text_used_by_default(self):
         blocks = build_system_with_context("ctx")
         assert blocks[0]["text"] == SYSTEM_PROMPT
+
+    def test_custom_system_prompt_override(self):
+        custom = "You are a custom prompt."
+        blocks = build_system_with_context("ctx", system_prompt=custom)
+        assert blocks[0]["text"] == custom
 
     def test_unknown_ttl_no_ttl_key(self):
         """TTL validation is in LLMConfig; build_system_with_context trusts callers."""
         blocks = build_system_with_context("ctx", ttl="5m")
         assert "ttl" not in blocks[-1]["cache_control"]
+
+
+class TestDescribeOperator:
+    """Test _describe_operator extraction logic."""
+
+    def test_uses_docstring_first_line(self):
+        def operator_example():
+            """Mutate X by doing Y. Example: `a` -> `b`."""
+
+        result = _describe_operator(type("FakeNode", (), {}), operator_example)
+        assert result == "Mutate X by doing Y. Example: `a` -> `b`."
+
+    def test_multiline_docstring_uses_first_line_only(self):
+        def operator_multi():
+            """First line summary.
+
+            Extended description that should be ignored.
+            """
+
+        result = _describe_operator(type("FakeNode", (), {}), operator_multi)
+        assert result == "First line summary."
+
+    def test_no_docstring_falls_back_to_name(self):
+        def operator_swap_args():
+            pass
+
+        NodeType = type("BinaryOperation", (), {})
+        result = _describe_operator(NodeType, operator_swap_args)
+        assert result == "swap args (targets BinaryOperation nodes)"
+
+    def test_empty_docstring_falls_back_to_name(self):
+        fn = MagicMock()
+        fn.__doc__ = ""
+        fn.__name__ = "operator_return_none"
+        NodeType = type("ReturnStatement", (), {})
+        result = _describe_operator(NodeType, fn)
+        assert result == "return none (targets ReturnStatement nodes)"
+
+    def test_whitespace_only_docstring_falls_back(self):
+        fn = MagicMock()
+        fn.__doc__ = "   \n   "
+        fn.__name__ = "operator_test"
+        NodeType = type("Node", (), {})
+        result = _describe_operator(NodeType, fn)
+        assert result == "test (targets Node nodes)"
+
+
+class TestBuildExclusionList:
+    """Test build_exclusion_list with explicit operator lists."""
+
+    def _make_operator(self, name: str, doc: str | None = None):
+        fn = lambda node: []  # noqa: E731
+        fn.__name__ = name
+        fn.__doc__ = doc
+        return fn
+
+    def test_empty_operator_lists_returns_hardcoded(self):
+        result = build_exclusion_list(operator_lists=[])
+        assert result == _HARDCODED_EXCLUSIONS
+
+    def test_none_queries_plugin_manager(self):
+        """When operator_lists is None, it tries to query the plugin manager."""
+        mock_ops = [
+            [(type("Node", (), {}), self._make_operator("operator_foo", "Do foo."))]
+        ]
+        with patch(
+            "mutmut_llm.prompts._get_registered_operators", return_value=mock_ops
+        ):
+            result = build_exclusion_list(operator_lists=None)
+        assert "Do foo." in result
+
+    def test_single_operator_with_docstring(self):
+        fn = self._make_operator(
+            "operator_return_none", "Mutate return to return None."
+        )
+        ops = [[(type("Node", (), {}), fn)]]
+        result = build_exclusion_list(operator_lists=ops)
+        assert "  * Mutate return to return None." in result
+
+    def test_single_operator_without_docstring(self):
+        fn = self._make_operator("operator_swap_args", None)
+        NodeType = type("BinaryOp", (), {})
+        ops = [[(NodeType, fn)]]
+        result = build_exclusion_list(operator_lists=ops)
+        assert "  * swap args (targets BinaryOp nodes)" in result
+
+    def test_multiple_operator_lists_combined(self):
+        fn1 = self._make_operator("operator_a", "Does A.")
+        fn2 = self._make_operator("operator_b", "Does B.")
+        ops = [
+            [(type("N1", (), {}), fn1)],
+            [(type("N2", (), {}), fn2)],
+        ]
+        result = build_exclusion_list(operator_lists=ops)
+        assert "Does A." in result
+        assert "Does B." in result
+
+    def test_deduplicates_identical_descriptions(self):
+        fn1 = self._make_operator("operator_x", "Same description.")
+        fn2 = self._make_operator("operator_y", "Same description.")
+        ops = [[(type("N", (), {}), fn1), (type("N", (), {}), fn2)]]
+        result = build_exclusion_list(operator_lists=ops)
+        assert result.count("Same description.") == 1
+
+    def test_mixed_docstring_and_fallback(self):
+        fn_with_doc = self._make_operator("operator_a", "Has a docstring.")
+        fn_no_doc = self._make_operator("operator_boundary_check", None)
+        NodeType = type("Compare", (), {})
+        ops = [[(NodeType, fn_with_doc), (NodeType, fn_no_doc)]]
+        result = build_exclusion_list(operator_lists=ops)
+        assert "Has a docstring." in result
+        assert "boundary check (targets Compare nodes)" in result
+
+    def test_each_line_starts_with_bullet(self):
+        fn1 = self._make_operator("operator_a", "Does A.")
+        fn2 = self._make_operator("operator_b", "Does B.")
+        ops = [[(type("N", (), {}), fn1), (type("N", (), {}), fn2)]]
+        result = build_exclusion_list(operator_lists=ops)
+        for line in result.split("\n"):
+            assert line.startswith("  * "), f"Line missing bullet prefix: {line!r}"
+
+
+class TestBuildSystemPrompt:
+    """Test build_system_prompt integration."""
+
+    def _make_operator(self, name: str, doc: str | None = None):
+        fn = lambda node: []  # noqa: E731
+        fn.__name__ = name
+        fn.__doc__ = doc
+        return fn
+
+    def test_with_operators_includes_descriptions(self):
+        fn = self._make_operator("operator_foo", "Mutate foo to bar.")
+        ops = [[(type("Node", (), {}), fn)]]
+        prompt = build_system_prompt(operator_lists=ops)
+        assert "Mutate foo to bar." in prompt
+        assert "mutation testing expert" in prompt
+
+    def test_with_empty_operators_uses_hardcoded(self):
+        prompt = build_system_prompt(operator_lists=[])
+        assert "Arithmetic operator swaps" in prompt
+
+    def test_template_braces_in_examples_preserved(self):
+        """Double braces in template must render as single braces in output."""
+        fn = self._make_operator("operator_x", "X.")
+        ops = [[(type("N", (), {}), fn)]]
+        prompt = build_system_prompt(operator_lists=ops)
+        assert '"mutated_code"' in prompt
+        assert "{{" not in prompt
+
+    def test_is_valid_template(self):
+        """SYSTEM_PROMPT_TEMPLATE has exactly one placeholder: {exclusion_list}."""
+        result = SYSTEM_PROMPT_TEMPLATE.format(exclusion_list="PLACEHOLDER")
+        assert "PLACEHOLDER" in result
+        assert "{exclusion_list}" not in result
+
+
+class TestGetRegisteredOperators:
+    """Test _get_registered_operators fallback behavior."""
+
+    def test_returns_empty_on_import_error(self):
+        import sys
+
+        from mutmut_llm.prompts import _get_registered_operators
+
+        with patch.dict(sys.modules, {"mutmut.plugin_manager": None}):
+            result = _get_registered_operators()
+            assert result == []
+
+    def test_returns_operators_when_available(self):
+        from mutmut_llm.prompts import _get_registered_operators
+
+        mock_pm = MagicMock()
+        mock_pm.hook.mutmut_register_operators.return_value = [
+            [(type("Node", (), {}), lambda n: [])]
+        ]
+        with patch("mutmut.plugin_manager.get_plugin_manager", return_value=mock_pm):
+            result = _get_registered_operators()
+            assert len(result) == 1
 
 
 class TestParseLlmResponse:
