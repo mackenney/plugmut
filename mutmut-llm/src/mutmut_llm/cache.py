@@ -12,6 +12,8 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from mutmut_llm._io import atomic_write
+
 CACHE_DIR = Path(".mutmut-cache") / "llm"
 
 
@@ -83,7 +85,7 @@ def write_cache_entry(entry: CacheEntry, base_dir: Path = Path(".")) -> Path:
 
     key = _cache_key(entry.file_path, entry.function_name, entry.source_hash)
     path = d / f"{key}.json"
-    path.write_text(json.dumps(entry.to_dict(), indent=2))
+    atomic_write(path, json.dumps(entry.to_dict(), indent=2))
     return path
 
 
