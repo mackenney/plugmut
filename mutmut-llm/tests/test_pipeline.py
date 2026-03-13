@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,27 +10,7 @@ from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.pipeline import GenerationResult, _call_llm_and_validate, run_generation
 from mutmut_llm.scope import ScopeTarget
-
-
-def _make_mock_response(
-    mutations: list[dict],
-    stop_reason: str = "end_turn",
-    cache_creation_input_tokens: int = 0,
-    cache_read_input_tokens: int = 0,
-) -> MagicMock:
-    """Create a mock Anthropic API response."""
-    text_block = MagicMock()
-    text_block.text = json.dumps(mutations)
-    response = MagicMock()
-    response.content = [text_block]
-    response.stop_reason = stop_reason
-    response.usage = MagicMock(
-        input_tokens=100,
-        output_tokens=200,
-        cache_creation_input_tokens=cache_creation_input_tokens,
-        cache_read_input_tokens=cache_read_input_tokens,
-    )
-    return response
+from tests.conftest import make_mock_response as _make_mock_response
 
 
 def _config(api_key: str = "test-key", enabled: bool = True) -> LLMConfig:

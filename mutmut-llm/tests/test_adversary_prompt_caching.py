@@ -21,28 +21,7 @@ from mutmut_llm.prompts import (
     build_user_prompt,
 )
 from mutmut_llm.scope import ScopeTarget
-
-
-def _make_mock_response(
-    mutations: list[dict],
-    stop_reason: str = "end_turn",
-    input_tokens: int = 100,
-    output_tokens: int = 200,
-    cache_creation_input_tokens: int = 0,
-    cache_read_input_tokens: int = 0,
-) -> MagicMock:
-    text_block = MagicMock()
-    text_block.text = json.dumps(mutations)
-    response = MagicMock()
-    response.content = [text_block]
-    response.stop_reason = stop_reason
-    response.usage = MagicMock(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cache_creation_input_tokens=cache_creation_input_tokens,
-        cache_read_input_tokens=cache_read_input_tokens,
-    )
-    return response
+from tests.conftest import make_mock_response as _make_mock_response
 
 
 def _config(**kwargs) -> LLMConfig:
