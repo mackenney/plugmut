@@ -264,6 +264,44 @@ class TestCallLlmAndValidate:
         call_kwargs = mock_client.messages.create.call_args
         assert call_kwargs.kwargs["temperature"] == 0.3
 
+    def test_pragma_violation_rejected(self):
+        original = (
+            "def f(x):\n    CONST = 42  # pragma: no mutate\n    return x + CONST"
+        )
+        target = ScopeTarget(file_path="test.py", function_name="f", source=original)
+        mutations = [
+            {
+                "mutated_code": "def f(x):\n    CONST = 99  # pragma: no mutate\n    return x + CONST",
+                "description": "change constant",
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        config = _config()
+        result = _call_llm_and_validate(mock_client, config, target, max_mutations=3)
+        assert len(result.mutations) == 0, (
+            "Pragma-violating mutation should be rejected"
+        )
+
+    def test_valid_mutation_with_pragma_passes(self):
+        original = (
+            "def f(x):\n    CONST = 42  # pragma: no mutate\n    return x + CONST"
+        )
+        target = ScopeTarget(file_path="test.py", function_name="f", source=original)
+        mutations = [
+            {
+                "mutated_code": "def f(x):\n    CONST = 42  # pragma: no mutate\n    return x - CONST",
+                "description": "change operator",
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(mutations)
+
+        config = _config()
+        result = _call_llm_and_validate(mock_client, config, target, max_mutations=3)
+        assert len(result.mutations) == 1, "Mutation not touching pragma should pass"
+
     def test_empty_response_returns_empty(self):
         target = ScopeTarget(
             file_path="test.py", function_name="f", source="def f(): pass"

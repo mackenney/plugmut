@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from mutmut_llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
 
 
@@ -40,6 +42,56 @@ class TestSystemPrompt:
     def test_prompt_word_count_reasonable(self):
         word_count = len(SYSTEM_PROMPT.split())
         assert word_count < 600, f"System prompt too long: {word_count} words"
+
+
+class TestSystemPromptFewShot:
+    """Validate that few-shot examples in the system prompt are well-formed."""
+
+    def test_good_example_is_valid_json(self):
+        idx = SYSTEM_PROMPT.index("Examples of GOOD mutations")
+        output_idx = SYSTEM_PROMPT.index("Output:\n", idx)
+        bad_idx = SYSTEM_PROMPT.index("Examples of BAD")
+        json_text = SYSTEM_PROMPT[output_idx + len("Output:\n") : bad_idx].strip()
+        parsed = json.loads(json_text)
+        assert isinstance(parsed, list)
+        assert len(parsed) >= 1
+        for entry in parsed:
+            assert "mutated_code" in entry
+            assert "description" in entry
+
+    def test_good_examples_are_syntactically_valid_python(self):
+        import ast
+
+        idx = SYSTEM_PROMPT.index("Examples of GOOD mutations")
+        output_idx = SYSTEM_PROMPT.index("Output:\n", idx)
+        bad_idx = SYSTEM_PROMPT.index("Examples of BAD")
+        json_text = SYSTEM_PROMPT[output_idx + len("Output:\n") : bad_idx].strip()
+        parsed = json.loads(json_text)
+        for entry in parsed:
+            code = entry["mutated_code"]
+            try:
+                ast.parse(code)
+            except SyntaxError:
+                pytest.fail(f"Few-shot good example is not valid Python: {code!r}")
+
+    def test_good_examples_are_actual_mutations(self):
+        original = "def clamp(x, lo, hi):\n    return max(lo, min(x, hi))"
+        idx = SYSTEM_PROMPT.index("Examples of GOOD mutations")
+        output_idx = SYSTEM_PROMPT.index("Output:\n", idx)
+        bad_idx = SYSTEM_PROMPT.index("Examples of BAD")
+        json_text = SYSTEM_PROMPT[output_idx + len("Output:\n") : bad_idx].strip()
+        parsed = json.loads(json_text)
+        for entry in parsed:
+            assert entry["mutated_code"] != original, (
+                "Good example is identical to input"
+            )
+
+    def test_bad_examples_describe_equivalence(self):
+        idx = SYSTEM_PROMPT.index("Examples of BAD mutations")
+        bad_section = SYSTEM_PROMPT[idx:]
+        assert bad_section.count("equivalent") >= 3, (
+            "Bad examples should clearly explain WHY each is bad (equivalence)"
+        )
 
 
 class TestBuildUserPrompt:

@@ -35,6 +35,14 @@ class TestDefaults:
         config = LLMConfig(api_key="sk-test-123")
         assert config.is_configured is True
 
+    def test_default_temperature(self):
+        config = LLMConfig()
+        assert config.temperature == 0.6
+
+    def test_llmconfig_without_temperature_kwarg(self):
+        config = LLMConfig(api_key="key", model="claude-sonnet-4-6")
+        assert config.temperature == 0.6
+
 
 # ---------------------------------------------------------------------------
 # Environment variable
@@ -207,6 +215,48 @@ model = "model-b"
 """)
         config2 = load_config(pyproject_path=pyproject, env={})
         assert config2.model == "model-b"
+
+
+class TestTemperatureLoading:
+    def test_temperature_from_toml(self, tmp_path):
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text("[tool.mutmut.llm]\ntemperature = 0.9\n")
+        config = load_config(pyproject_path=toml, env={})
+        assert config.temperature == 0.9
+
+    def test_missing_temperature_defaults(self, tmp_path):
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text('[tool.mutmut.llm]\nmodel = "claude-sonnet-4-6"\n')
+        config = load_config(pyproject_path=toml, env={})
+        assert config.temperature == 0.6
+
+    def test_temperature_type_is_float(self, tmp_path):
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text("[tool.mutmut.llm]\ntemperature = 0.5\n")
+        config = load_config(pyproject_path=toml, env={})
+        assert isinstance(config.temperature, float)
+        assert config.temperature == 0.5
+
+    def test_all_config_keys_together(self, tmp_path):
+        import textwrap
+
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text(
+            textwrap.dedent("""\
+            [tool.mutmut.llm]
+            model = "claude-haiku-4-5"
+            max_mutations_per_function = 10
+            max_tokens = 8192
+            enabled = false
+            temperature = 0.3
+        """)
+        )
+        config = load_config(pyproject_path=toml, env={})
+        assert config.model == "claude-haiku-4-5"
+        assert config.max_mutations_per_function == 10
+        assert config.max_tokens == 8192
+        assert config.enabled is False
+        assert config.temperature == 0.3
 
 
 class TestTemperatureValidation:
