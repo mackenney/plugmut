@@ -1,8 +1,9 @@
 """Lightweight validation for LLM-generated mutations.
 
-Two stages:
+Three stages:
 1. Syntax check via libcst (reject unparseable code).
 2. Import guard — reject mutations that introduce new imports.
+3. Pragma guard — reject mutations that modify ``# pragma: no mutate`` lines.
 """
 
 from __future__ import annotations
@@ -29,12 +30,44 @@ def validate_imports(mutated_code: str, original_code: str) -> str | None:
     return None
 
 
+def _has_pragma(line: str) -> bool:
+    """Detect ``# pragma: no mutate`` in *line*, case-insensitively and regardless of spacing after ``#``."""
+    stripped = line.lstrip()
+    idx = stripped.find("#")
+    if idx == -1:
+        return False
+    comment = " ".join(stripped[idx + 1 :].split()).lower()
+    return "pragma: no mutate" in comment
+
+
+def validate_pragmas(mutated_code: str, original_code: str) -> str | None:
+    """Reject mutations that modify lines marked with ``# pragma: no mutate``."""
+    original_lines = original_code.splitlines()
+    mutated_lines = mutated_code.splitlines()
+
+    pragma_lines = [
+        (i, line) for i, line in enumerate(original_lines) if _has_pragma(line)
+    ]
+
+    if not pragma_lines:
+        return None
+
+    for idx, original_line in pragma_lines:
+        if idx >= len(mutated_lines) or mutated_lines[idx] != original_line:
+            return f"Pragma-marked line modified: {original_line.strip()!r}"
+
+    return None
+
+
 def validate_mutation(mutated_code: str, original_code: str) -> str | None:
-    """Run syntax + import validation. Return first error or None."""
+    """Run syntax + import + pragma validation. Return first error or None."""
     err = validate_syntax(mutated_code)
     if err:
         return err
-    return validate_imports(mutated_code, original_code)
+    err = validate_imports(mutated_code, original_code)
+    if err:
+        return err
+    return validate_pragmas(mutated_code, original_code)
 
 
 class _ImportCollector(cst.CSTVisitor):

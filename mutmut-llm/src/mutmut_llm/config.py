@@ -8,6 +8,7 @@ Supported pyproject.toml keys (all optional)::
     model = "claude-sonnet-4-6"
     max_mutations_per_function = 5
     max_tokens = 4096
+    temperature = 0.6
     enabled = true
 """
 
@@ -34,6 +35,7 @@ class LLMConfig:
     model: str = "claude-sonnet-4-6"
     max_mutations_per_function: int = 5
     max_tokens: int = 4096
+    temperature: float = 0.6
     enabled: bool = True
 
     @property
@@ -86,8 +88,13 @@ def load_config(
             )
         if "max_tokens" in section:
             config.max_tokens = int(section["max_tokens"])
+        if "temperature" in section:
+            config.temperature = float(section["temperature"])
         if "enabled" in section:
             config.enabled = bool(section["enabled"])
+
+    if not 0.0 <= config.temperature <= 1.0:
+        raise ValueError(f"temperature must be in [0.0, 1.0], got {config.temperature}")
 
     config.api_key = env.get("ANTHROPIC_API_KEY", "")
 

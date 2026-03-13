@@ -27,11 +27,33 @@ Rules:
 - Include the COMPLETE mutated function definition (including `def` line and full body).
 - NEVER return the original code unchanged.
 
+- Lines containing `# pragma: no mutate` must NOT be modified.
+- Never move, remove, or modify pragma comments.
+- Each mutation must be semantically distinct from the others. Do not generate multiple variations of the same idea.
+
 Safety constraints:
 - Only modify control flow, return values, conditions, and arithmetic.
 - Never introduce calls to os, subprocess, eval, exec, pickle, socket, \
 requests, or any I/O not already in the original code.
 - Only use functions and methods already present in the original code.
+
+Examples of GOOD mutations (the kind you should generate):
+
+Input:
+def clamp(x, lo, hi):
+    return max(lo, min(x, hi))
+
+Output:
+[
+  {"mutated_code": "def clamp(x, lo, hi):\\n    return max(lo, min(x, lo))", "description": "Use lo instead of hi in inner min — clamp always returns lo for values above lo"},
+  {"mutated_code": "def clamp(x, lo, hi):\\n    return max(hi, min(x, lo))", "description": "Swap lo/hi in outer max — returns hi instead of clamped value when x < lo"}
+]
+
+Examples of BAD mutations (do NOT generate these):
+- `return sorted(items)` → `return list(sorted(items))` — equivalent, sorted() already returns list
+- `x = 5` → `tmp = 5; x = tmp` — equivalent, intermediate variable changes nothing
+- `self.data[:]` instead of `self.data` — equivalent for most types
+- `str(name)` when name is already a str — equivalent, no behavior change
 
 Output a JSON array:
 [{"mutated_code": "def func(...):\\n    ...", "description": "what changed and why it might survive"}]

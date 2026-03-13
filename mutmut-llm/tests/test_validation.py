@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from mutmut_llm.validation import (
     _extract_imports,
+    _has_pragma,
     validate_imports,
     validate_mutation,
+    validate_pragmas,
     validate_syntax,
 )
 
@@ -100,6 +102,18 @@ class TestValidateMutation:
         mutated = "def f(x):\n    if x > 0:\n        return x\n    return -x"
         assert validate_mutation(mutated, self.ORIGINAL) is None
 
+    def test_syntax_error_before_pragma_check(self):
+        original = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        mutated = "def f(\n    broken"
+        result = validate_mutation(mutated, original)
+        assert "Syntax error" in result, "Syntax check should run first"
+
+    def test_import_check_before_pragma_check(self):
+        original = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        mutated = "import os\ndef f():\n    x = 999  # pragma: no mutate\n    return os.getcwd()"
+        result = validate_mutation(mutated, original)
+        assert "import" in result.lower(), "Import check should run before pragma check"
+
 
 class TestExtractImports:
     def test_import_statement(self):
@@ -146,3 +160,157 @@ class TestExtractImports:
 
     def test_multiple_names_in_single_import(self):
         assert _extract_imports("import os, sys") == {"os", "sys"}
+
+
+class TestValidatePragmas:
+    ORIGINAL_WITH_PRAGMA = (
+        "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x + 1"
+    )
+
+    def test_pragma_line_preserved_passes(self):
+        mutated = "def f(x):\n    ignored = 0  # pragma: no mutate\n    return x - 1"
+        assert validate_pragmas(mutated, self.ORIGINAL_WITH_PRAGMA) is None
+
+    def test_pragma_line_modified_rejected(self):
+        mutated = "def f(x):\n    ignored = 999  # pragma: no mutate\n    return x + 1"
+        result = validate_pragmas(mutated, self.ORIGINAL_WITH_PRAGMA)
+        assert result is not None
+        assert "Pragma-marked line modified" in result
+
+    def test_pragma_line_removed_rejected(self):
+        mutated = "def f(x):\n    return x + 1"
+        result = validate_pragmas(mutated, self.ORIGINAL_WITH_PRAGMA)
+        assert result is not None
+        assert "Pragma-marked line modified" in result
+
+    def test_no_pragmas_passes(self):
+        original = "def f(x):\n    return x + 1"
+        mutated = "def f(x):\n    return x - 1"
+        assert validate_pragmas(mutated, original) is None
+
+    def test_all_lines_have_pragma(self):
+        original = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
+        mutated = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
+        assert validate_pragmas(mutated, original) is None
+
+    def test_mixed_case_pragma_detected(self):
+        original = "def f():\n    x = 1  # Pragma: No Mutate\n    return x"
+        mutated = "def f():\n    x = 2  # Pragma: No Mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+    def test_extra_spaces_in_pragma_detected(self):
+        original = "def f():\n    x = 1  #  pragma:  no mutate\n    return x"
+        mutated = "def f():\n    x = 2  #  pragma:  no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None
+
+
+class TestValidatePragmasPositional:
+    """Edge cases where line insertion/deletion shifts pragma positions."""
+
+    def test_mutation_inserts_line_before_pragma(self):
+        original = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        mutated = "def f():\n    y = 0\n    x = 1  # pragma: no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None, "Should reject when line inserted before pragma"
+
+    def test_mutation_deletes_line_before_pragma(self):
+        original = "def f():\n    y = 0\n    x = 1  # pragma: no mutate\n    return x"
+        mutated = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None, "Should reject when line deleted before pragma"
+
+    def test_multiple_pragmas_second_violated(self):
+        original = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate\nz = 3"
+        mutated = "x = 1  # pragma: no mutate\ny = 999  # pragma: no mutate\nz = 3"
+        result = validate_pragmas(mutated, original)
+        assert result is not None, "Should reject: second pragma line modified"
+
+    def test_pragma_in_multiline_string(self):
+        import textwrap
+
+        original = textwrap.dedent("""\
+            def f():
+                msg = '''
+                # pragma: no mutate
+                '''
+                return msg + "hello"
+        """)
+        mutated = textwrap.dedent("""\
+            def f():
+                msg = '''
+                # pragma: no mutate
+                '''
+                return msg + "world"
+        """)
+        result = validate_pragmas(mutated, original)
+        assert result is None, (
+            "Should pass: pragma in string data, code changed elsewhere"
+        )
+
+    def test_mutated_code_shorter_than_pragma_index(self):
+        original = "def f():\n    a = 1\n    b = 2\n    c = 3  # pragma: no mutate\n    return a + b + c"
+        mutated = "def f():\n    return 0"
+        result = validate_pragmas(mutated, original)
+        assert result is not None, "Should reject: pragma line is gone"
+
+
+class TestValidatePragmasBoundary:
+    def test_empty_original(self):
+        assert validate_pragmas("def f(): pass", "") is None
+
+    def test_empty_mutated(self):
+        original = "x = 1  # pragma: no mutate"
+        result = validate_pragmas("", original)
+        assert result is not None
+
+    def test_identical_code(self):
+        code = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        assert validate_pragmas(code, code) is None
+
+    def test_pragma_on_def_line(self):
+        original = "def f():  # pragma: no mutate\n    return 1"
+        mutated = "def g():  # pragma: no mutate\n    return 1"
+        result = validate_pragmas(mutated, original)
+        assert result is not None, "Renaming function with pragma should be rejected"
+
+    def test_windows_line_endings(self):
+        original = "def f():\r\n    x = 1  # pragma: no mutate\r\n    return x"
+        mutated = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is None, "Should pass: same content, different line endings"
+
+    def test_tab_vs_spaces_in_pragma_line(self):
+        original = "def f():\n\tx = 1  # pragma: no mutate\n\treturn x"
+        mutated = "def f():\n    x = 1  # pragma: no mutate\n    return x"
+        result = validate_pragmas(mutated, original)
+        assert result is not None, (
+            "Tab-to-space conversion should be detected as modification"
+        )
+
+
+class TestHasPragma:
+    def test_standard_pragma(self):
+        assert _has_pragma("    x = 1  # pragma: no mutate") is True
+
+    def test_no_space_after_hash(self):
+        assert _has_pragma("    x = 1  #pragma: no mutate") is True
+
+    def test_uppercase(self):
+        assert _has_pragma("    x = 1  # PRAGMA: NO MUTATE") is True
+
+    def test_mixed_case(self):
+        assert _has_pragma("    x = 1  # Pragma: No Mutate") is True
+
+    def test_extra_spaces(self):
+        assert _has_pragma("    x = 1  #  pragma:  no mutate") is True
+
+    def test_no_pragma(self):
+        assert _has_pragma("    x = 1") is False
+
+    def test_no_comment(self):
+        assert _has_pragma("x = 1") is False
+
+    def test_pragma_with_trailing_text(self):
+        assert _has_pragma("x = 1  # pragma: no mutate -- reason") is True

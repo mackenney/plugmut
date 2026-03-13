@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.config import find_pyproject
@@ -33,6 +34,14 @@ class TestDefaults:
     def test_is_configured_with_key(self):
         config = LLMConfig(api_key="sk-test-123")
         assert config.is_configured is True
+
+    def test_default_temperature(self):
+        config = LLMConfig()
+        assert config.temperature == 0.6
+
+    def test_llmconfig_without_temperature_kwarg(self):
+        config = LLMConfig(api_key="key", model="claude-sonnet-4-6")
+        assert config.temperature == 0.6
 
 
 # ---------------------------------------------------------------------------
@@ -206,3 +215,75 @@ model = "model-b"
 """)
         config2 = load_config(pyproject_path=pyproject, env={})
         assert config2.model == "model-b"
+
+
+class TestTemperatureLoading:
+    def test_temperature_from_toml(self, tmp_path):
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text("[tool.mutmut.llm]\ntemperature = 0.9\n")
+        config = load_config(pyproject_path=toml, env={})
+        assert config.temperature == 0.9
+
+    def test_missing_temperature_defaults(self, tmp_path):
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text('[tool.mutmut.llm]\nmodel = "claude-sonnet-4-6"\n')
+        config = load_config(pyproject_path=toml, env={})
+        assert config.temperature == 0.6
+
+    def test_temperature_type_is_float(self, tmp_path):
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text("[tool.mutmut.llm]\ntemperature = 0.5\n")
+        config = load_config(pyproject_path=toml, env={})
+        assert isinstance(config.temperature, float)
+        assert config.temperature == 0.5
+
+    def test_all_config_keys_together(self, tmp_path):
+        import textwrap
+
+        toml = tmp_path / "pyproject.toml"
+        toml.write_text(
+            textwrap.dedent("""\
+            [tool.mutmut.llm]
+            model = "claude-haiku-4-5"
+            max_mutations_per_function = 10
+            max_tokens = 8192
+            enabled = false
+            temperature = 0.3
+        """)
+        )
+        config = load_config(pyproject_path=toml, env={})
+        assert config.model == "claude-haiku-4-5"
+        assert config.max_mutations_per_function == 10
+        assert config.max_tokens == 8192
+        assert config.enabled is False
+        assert config.temperature == 0.3
+
+
+class TestTemperatureValidation:
+    def test_temperature_above_one_raises(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""\
+[tool.mutmut.llm]
+temperature = 1.5
+""")
+        with pytest.raises(ValueError, match="temperature must be in"):
+            load_config(pyproject_path=pyproject, env={})
+
+    def test_temperature_negative_raises(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""\
+[tool.mutmut.llm]
+temperature = -0.1
+""")
+        with pytest.raises(ValueError, match="temperature must be in"):
+            load_config(pyproject_path=pyproject, env={})
+
+    def test_temperature_at_boundaries_is_valid(self, tmp_path):
+        for temp in (0.0, 0.5, 1.0):
+            pyproject = tmp_path / "pyproject.toml"
+            pyproject.write_text(f"""\
+[tool.mutmut.llm]
+temperature = {temp}
+""")
+            config = load_config(pyproject_path=pyproject, env={})
+            assert config.temperature == temp
