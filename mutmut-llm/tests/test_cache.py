@@ -8,6 +8,8 @@ import json
 from mutmut_llm.cache import CACHE_DIR
 from mutmut_llm.cache import CacheEntry
 from mutmut_llm.cache import CachedMutation
+from mutmut_llm.cache import _cache_key
+from mutmut_llm.cache import _read_any_matching_entry
 from mutmut_llm.cache import clear_cache
 from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.cache import read_cache_entry
@@ -458,3 +460,232 @@ class TestMultiModelCache:
         assert len(entries) == 2
         models = {e.model for e in entries}
         assert models == {"org__model", "org_model"}
+
+
+class TestModelNameSanitization:
+    """Model names containing __ or / must not corrupt the cache key."""
+
+    def test_model_with_double_underscore_round_trips(self, tmp_path):
+        entry = _make_entry(model="org__custom-model")
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        loaded = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model="org__custom-model",
+        )
+        assert loaded is not None
+        assert loaded.model == "org__custom-model"
+
+    def test_model_with_double_underscore_preserves_segment_count(self):
+        """Model names with __ are sanitized to preserve the 4-segment format."""
+        key = _cache_key("src/mod.py", "foo", "abc123", "a__b")
+        segments = key.split("__")
+        assert len(segments) == 4
+
+    def test_model_with_slashes_sanitized(self, tmp_path):
+        """Model names like 'anthropic/claude-3' have / replaced so filename is valid."""
+        entry = _make_entry(model="anthropic/claude-3-sonnet")
+        path = write_cache_entry(entry, base_dir=tmp_path)
+        assert "/" not in path.name
+
+        loaded = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model="anthropic/claude-3-sonnet",
+        )
+        assert loaded is not None
+
+    def test_slash_vs_underscore_no_collision(self, tmp_path):
+        """'anthropic/model' and 'anthropic_model' produce distinct cache keys."""
+        source = "def foo(): return 1"
+        entry_a = _make_entry(
+            model="anthropic/model",
+            source=source,
+            mutations=[
+                CachedMutation(mutated_code="def foo(): return 1", description="a")
+            ],
+        )
+        entry_b = _make_entry(
+            model="anthropic_model",
+            source=source,
+            mutations=[
+                CachedMutation(mutated_code="def foo(): return 2", description="b")
+            ],
+        )
+
+        write_cache_entry(entry_a, base_dir=tmp_path)
+        write_cache_entry(entry_b, base_dir=tmp_path)
+
+        entries = list_cache_entries(base_dir=tmp_path)
+        assert len(entries) == 2
+
+
+class TestBackwardsCompat:
+    """Old 3-segment filenames (no model) must still be readable."""
+
+    def test_old_format_read_via_model_none(self, tmp_path):
+        """read_cache_entry(model=None) finds old 3-segment files written as raw JSON."""
+        d = tmp_path / CACHE_DIR
+        d.mkdir(parents=True)
+
+        src_h = source_hash("def foo(): return 1")
+        entry_data = {
+            "function_name": "foo",
+            "file_path": "src/mod.py",
+            "source_hash": src_h,
+            "mutations": [
+                {"mutated_code": "def foo(): return 0", "description": "old"}
+            ],
+        }
+        old_filename = f"src_mod.py__foo__{src_h}.json"
+        (d / old_filename).write_text(json.dumps(entry_data))
+
+        loaded = read_cache_entry(
+            "src/mod.py", "foo", src_h, base_dir=tmp_path, model=None
+        )
+        assert loaded is not None
+        assert loaded.model == ""
+
+    def test_old_format_not_found_by_explicit_model(self, tmp_path):
+        """read_cache_entry(model='claude-sonnet-4-6') must NOT find old 3-segment files."""
+        d = tmp_path / CACHE_DIR
+        d.mkdir(parents=True)
+
+        src_h = source_hash("def foo(): return 1")
+        entry_data = {
+            "function_name": "foo",
+            "file_path": "src/mod.py",
+            "source_hash": src_h,
+            "mutations": [
+                {"mutated_code": "def foo(): return 0", "description": "old"}
+            ],
+        }
+        old_filename = f"src_mod.py__foo__{src_h}.json"
+        (d / old_filename).write_text(json.dumps(entry_data))
+
+        loaded = read_cache_entry(
+            "src/mod.py", "foo", src_h, base_dir=tmp_path, model="claude-sonnet-4-6"
+        )
+        assert loaded is None
+
+
+class TestEmptyModelField:
+    def test_write_empty_model_produces_3_segment_filename(self, tmp_path):
+        entry = _make_entry(model="")
+        path = write_cache_entry(entry, base_dir=tmp_path)
+        segments = path.stem.split("__")
+        assert len(segments) == 3
+
+    def test_read_with_empty_string_model(self, tmp_path):
+        """read_cache_entry(model='') should find entries written with model=''."""
+        entry = _make_entry(model="")
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        loaded = read_cache_entry(
+            entry.file_path,
+            entry.function_name,
+            entry.source_hash,
+            base_dir=tmp_path,
+            model="",
+        )
+        assert loaded is not None
+
+
+class TestGlobCollision:
+    """_read_any_matching_entry uses glob — verify hash-prefix collisions are handled."""
+
+    def test_hash_prefix_collision(self, tmp_path):
+        """Hash 'abc123' glob must not incorrectly match 'abc12345'."""
+        d = tmp_path / CACHE_DIR
+        d.mkdir(parents=True)
+
+        short_hash = "abc1234567890123"
+        long_hash = "abc12345678901234"
+
+        entry_short = {
+            "function_name": "foo",
+            "file_path": "src/mod.py",
+            "source_hash": short_hash,
+            "mutations": [
+                {"mutated_code": "def foo(): return 1", "description": "short"}
+            ],
+        }
+        entry_long = {
+            "function_name": "foo",
+            "file_path": "src/mod.py",
+            "source_hash": long_hash,
+            "mutations": [
+                {"mutated_code": "def foo(): return 2", "description": "long"}
+            ],
+        }
+
+        (d / f"src_mod.py__foo__{short_hash}__modelA.json").write_text(
+            json.dumps(entry_short)
+        )
+        (d / f"src_mod.py__foo__{long_hash}__modelB.json").write_text(
+            json.dumps(entry_long)
+        )
+
+        loaded = _read_any_matching_entry("src/mod.py", "foo", short_hash, tmp_path)
+        if loaded is not None:
+            assert loaded.source_hash == short_hash
+
+    def test_glob_matches_model_suffix_starting_with_hash(self, tmp_path):
+        """Glob finds 4-segment entries where model name follows the hash segment."""
+        d = tmp_path / CACHE_DIR
+        d.mkdir(parents=True)
+
+        src_h = source_hash("def foo(): return 1")
+        entry_data = {
+            "function_name": "foo",
+            "file_path": "src/mod.py",
+            "source_hash": src_h,
+            "mutations": [
+                {"mutated_code": "def foo(): return 0", "description": "test"}
+            ],
+            "model": "v2-model",
+        }
+        (d / f"src_mod.py__foo__{src_h}__v2-model.json").write_text(
+            json.dumps(entry_data)
+        )
+
+        loaded = _read_any_matching_entry("src/mod.py", "foo", src_h, tmp_path)
+        assert loaded is not None
+
+
+class TestReadAnyMatchingEntry:
+    def test_returns_match_when_multiple_models_exist(self, tmp_path):
+        """When multiple models exist, _read_any_matching_entry returns one of them."""
+        source = "def foo(): return 1"
+        entry_a = _make_entry(model="aaa-model", source=source)
+        entry_z = _make_entry(
+            model="zzz-model",
+            source=source,
+            mutations=[
+                CachedMutation(mutated_code="def foo(): return 99", description="z-mut")
+            ],
+        )
+        write_cache_entry(entry_a, base_dir=tmp_path)
+        write_cache_entry(entry_z, base_dir=tmp_path)
+
+        loaded = _read_any_matching_entry(
+            "src/module.py", "foo", source_hash(source), tmp_path
+        )
+        assert loaded is not None
+
+    def test_glob_fallback_finds_model_entry(self, tmp_path):
+        """Model-specific entries are found via the glob fallback path."""
+        source = "def foo(): return 1"
+        entry = _make_entry(model="some-model", source=source)
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        loaded = _read_any_matching_entry(
+            "src/module.py", "foo", source_hash(source), tmp_path
+        )
+        assert loaded is not None
+        assert loaded.model == "some-model"
