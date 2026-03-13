@@ -47,6 +47,54 @@ class TestBuildUserPrompt:
         assert "File context" not in prompt
 
 
+class TestSystemBlockStructure:
+    """Verify system blocks match Anthropic's expected content-block schema."""
+
+    def test_block_has_required_keys_with_context(self):
+        blocks = build_system_with_context("import os")
+        for block in blocks:
+            assert "type" in block
+            assert "text" in block
+            assert block["type"] == "text"
+
+    def test_block_has_required_keys_without_context(self):
+        blocks = build_system_with_context("")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "text"
+        assert "text" in blocks[0]
+        assert "cache_control" in blocks[0]
+
+    def test_cache_control_only_on_last_block(self):
+        blocks = build_system_with_context("import os")
+        assert "cache_control" not in blocks[0]
+        assert "cache_control" in blocks[-1]
+
+    def test_cache_control_shape(self):
+        blocks = build_system_with_context("ctx")
+        cc = blocks[-1]["cache_control"]
+        assert "type" in cc
+        assert cc["type"] == "ephemeral"
+
+    def test_no_extra_keys_in_blocks(self):
+        """Anthropic API rejects unknown keys in content blocks."""
+        blocks = build_system_with_context("ctx")
+        allowed_keys = {"type", "text", "cache_control"}
+        for block in blocks:
+            assert set(block.keys()) <= allowed_keys
+
+    def test_none_context_produces_single_block(self):
+        """None is falsy like empty string — should not crash."""
+        blocks = build_system_with_context(None)  # type: ignore[arg-type]
+        assert len(blocks) == 1
+        assert "cache_control" in blocks[0]
+
+    def test_whitespace_only_context_treated_as_empty(self):
+        """Whitespace-only context is stripped and treated as no context."""
+        blocks = build_system_with_context("   ")
+        assert len(blocks) == 1
+        assert "cache_control" in blocks[0]
+
+
 class TestBuildSystemWithContext:
     def test_empty_context_single_block(self):
         blocks = build_system_with_context("")

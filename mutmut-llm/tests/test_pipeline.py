@@ -431,3 +431,165 @@ class TestPromptCaching:
         assert "Cache hit rate:" in output
         # 2 functions but budget=1, so 1 call: 400 read / (600 input + 400 read + 0 write) = 40%
         assert "40%" in output
+
+
+class TestUsageFieldExtraction:
+    """Verify the pipeline correctly reads Anthropic's usage field names."""
+
+    def test_missing_cache_fields_in_usage_default_to_zero(self):
+        """If Anthropic doesn't return cache fields (old API), getattr defaults to 0."""
+        import json
+
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "d"}
+        ]
+
+        usage = MagicMock(spec=["input_tokens", "output_tokens"])
+        usage.input_tokens = 50
+        usage.output_tokens = 100
+
+        text_block = MagicMock()
+        text_block.text = json.dumps(mutations)
+        response = MagicMock()
+        response.content = [text_block]
+        response.stop_reason = "end_turn"
+        response.usage = usage
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = response
+
+        result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+        assert result.cache_creation_tokens == 0
+        assert result.cache_read_tokens == 0
+
+    def test_no_usage_at_all(self):
+        """If response has no usage attribute, all tokens default to 0."""
+        import json
+
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "d"}
+        ]
+
+        text_block = MagicMock()
+        text_block.text = json.dumps(mutations)
+        response = MagicMock(spec=["content", "stop_reason"])
+        response.content = [text_block]
+        response.stop_reason = "end_turn"
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = response
+
+        result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+        assert result.input_tokens == 0
+        assert result.output_tokens == 0
+        assert result.cache_creation_tokens == 0
+        assert result.cache_read_tokens == 0
+
+    def test_pipeline_passes_raw_api_tokens(self):
+        """Verify pipeline doesn't subtract cache tokens from input_tokens."""
+        target = ScopeTarget(
+            file_path="test.py",
+            function_name="f",
+            source="def f(x):\n    return x + 1\n",
+        )
+        mutations = [
+            {"mutated_code": "def f(x):\n    return x - 1", "description": "d"}
+        ]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(
+            mutations,
+            input_tokens=50,
+            output_tokens=100,
+            cache_creation_input_tokens=800,
+            cache_read_input_tokens=200,
+        )
+
+        result = _call_llm_and_validate(mock_client, _config(), target, max_mutations=3)
+        assert result.input_tokens == 50
+        assert result.cache_creation_tokens == 800
+        assert result.cache_read_tokens == 200
+
+
+class TestCacheHitLogging:
+    def test_no_cache_tokens_no_log(self, tmp_path, capsys):
+        """When no cache tokens at all, cache hit line should not appear."""
+        from mutmut_llm.pipeline import _generate_mutations
+
+        mock_client = MagicMock()
+        mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
+        mock_client.messages.create.return_value = _make_mock_response(
+            mutations, cache_creation_input_tokens=0, cache_read_input_tokens=0
+        )
+
+        targets = [
+            ScopeTarget(file_path="t.py", function_name="f", source="def f(): pass\n")
+        ]
+        budget = {"t.py::f": 3}
+
+        with patch("anthropic.Anthropic", return_value=mock_client):
+            _generate_mutations(
+                _config(), targets, budget, total_budget=10, base_dir=tmp_path
+            )
+
+        output = capsys.readouterr().out
+        assert "Cache hit rate" not in output
+
+    def test_all_cache_read_shows_100_percent(self, tmp_path, capsys):
+        from mutmut_llm.pipeline import _generate_mutations
+
+        mock_client = MagicMock()
+        mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
+        mock_client.messages.create.return_value = _make_mock_response(
+            mutations,
+            input_tokens=0,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=500,
+        )
+
+        targets = [
+            ScopeTarget(file_path="t.py", function_name="f", source="def f(): pass\n")
+        ]
+        budget = {"t.py::f": 3}
+
+        with patch("anthropic.Anthropic", return_value=mock_client):
+            _generate_mutations(
+                _config(), targets, budget, total_budget=10, base_dir=tmp_path
+            )
+
+        output = capsys.readouterr().out
+        assert "Cache hit rate: 100%" in output
+
+    def test_mixed_cache_shows_correct_percentage(self, tmp_path, capsys):
+        from mutmut_llm.pipeline import _generate_mutations
+
+        mock_client = MagicMock()
+        mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
+        mock_client.messages.create.return_value = _make_mock_response(
+            mutations,
+            cache_creation_input_tokens=250,
+            cache_read_input_tokens=750,
+        )
+
+        targets = [
+            ScopeTarget(file_path="t.py", function_name="f", source="def f(): pass\n")
+        ]
+        budget = {"t.py::f": 3}
+
+        with patch("anthropic.Anthropic", return_value=mock_client):
+            _generate_mutations(
+                _config(), targets, budget, total_budget=10, base_dir=tmp_path
+            )
+
+        output = capsys.readouterr().out
+        # 750 / (100 input + 750 cache_read + 250 cache_write) = 68%
+        assert "Cache hit rate: 68%" in output

@@ -94,6 +94,29 @@ class TestCalculateCost:
         assert p.cache_write_per_million == pytest.approx(12.5)
         assert p.cache_read_per_million == pytest.approx(1.0)
 
+    def test_opus_cache_write_rate(self):
+        p = MODEL_PRICING["claude-opus-4-6"]
+        assert p.cache_write_per_million == pytest.approx(p.input_per_million * 1.25)
+
+    def test_opus_cache_read_rate(self):
+        p = MODEL_PRICING["claude-opus-4-6"]
+        assert p.cache_read_per_million == pytest.approx(p.input_per_million * 0.10)
+
+    def test_pure_cache_read_no_double_counting(self):
+        """All input from cache — input_tokens=0, only cache_read charged."""
+        cost = calculate_cost(
+            "claude-sonnet-4-6",
+            input_tokens=0,
+            output_tokens=100,
+            cache_creation_tokens=0,
+            cache_read_tokens=1000,
+        )
+        p = MODEL_PRICING["claude-sonnet-4-6"]
+        expected = (
+            100 * p.output_per_million + 1000 * p.cache_read_per_million
+        ) / 1_000_000
+        assert cost == pytest.approx(expected)
+
 
 class TestFormatCost:
     def test_zero(self):

@@ -222,3 +222,53 @@ class TestResolveScopeDeep:
         result = resolve_scope_deep([str(tmp_path)], budget=10)
         assert len(result.targets) == 1
         assert result.targets[0].function_name == "hello"
+
+
+class TestSortStability:
+    def test_same_file_preserves_order(self):
+        """Multiple functions in the same file should maintain original order after sort."""
+        targets = [
+            ScopeTarget(
+                file_path="same.py",
+                function_name="z_func",
+                source="def z_func(): pass\n",
+            ),
+            ScopeTarget(
+                file_path="same.py",
+                function_name="a_func",
+                source="def a_func(): pass\n",
+            ),
+            ScopeTarget(
+                file_path="same.py",
+                function_name="m_func",
+                source="def m_func(): pass\n",
+            ),
+        ]
+        sorted_targets = sorted(targets, key=lambda t: t.file_path)
+        assert [t.function_name for t in sorted_targets] == [
+            "z_func",
+            "a_func",
+            "m_func",
+        ]
+
+    def test_sort_groups_by_file_for_caching(self):
+        """Functions from same file should be grouped together for cache locality."""
+        targets = [
+            ScopeTarget(
+                file_path="b.py", function_name="b1", source="def b1(): pass\n"
+            ),
+            ScopeTarget(
+                file_path="a.py", function_name="a1", source="def a1(): pass\n"
+            ),
+            ScopeTarget(
+                file_path="b.py", function_name="b2", source="def b2(): pass\n"
+            ),
+            ScopeTarget(
+                file_path="a.py", function_name="a2", source="def a2(): pass\n"
+            ),
+        ]
+        sorted_targets = sorted(targets, key=lambda t: t.file_path)
+        file_order = [t.file_path for t in sorted_targets]
+        assert file_order == ["a.py", "a.py", "b.py", "b.py"]
+        a_funcs = [t.function_name for t in sorted_targets if t.file_path == "a.py"]
+        assert a_funcs == ["a1", "a2"]

@@ -301,6 +301,37 @@ class TestCacheEntrySerialization:
         assert restored.output_tokens == entry.output_tokens
         assert restored.generated_at == entry.generated_at
 
+    def test_old_entry_without_cache_fields_defaults_to_zero(self):
+        """Entries cached before prompt caching lack cache_*_tokens fields."""
+        old_data = {
+            "function_name": "f",
+            "file_path": "test.py",
+            "source_hash": "abc123",
+            "mutations": [{"mutated_code": "def f(): pass", "description": "d"}],
+            "model": "claude-sonnet-4-6",
+            "cost_usd": 0.001,
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "generated_at": "2025-01-01T00:00:00Z",
+        }
+        entry = CacheEntry.from_dict(old_data)
+        assert entry.cache_creation_tokens == 0
+        assert entry.cache_read_tokens == 0
+
+    def test_roundtrip_preserves_cache_token_fields(self):
+        entry = CacheEntry(
+            function_name="f",
+            file_path="test.py",
+            source_hash="abc",
+            mutations=[CachedMutation("def f(): pass", "d")],
+            cache_creation_tokens=500,
+            cache_read_tokens=300,
+        )
+        data = entry.to_dict()
+        restored = CacheEntry.from_dict(data)
+        assert restored.cache_creation_tokens == 500
+        assert restored.cache_read_tokens == 300
+
     def test_cost_fields_persisted_to_disk(self, tmp_path):
         entry = CacheEntry(
             function_name="bar",
