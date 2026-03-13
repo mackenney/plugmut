@@ -9,6 +9,7 @@ Supported pyproject.toml keys (all optional)::
     max_mutations_per_function = 5
     max_tokens = 4096
     enabled = true
+    cache_ttl = "5m"
 """
 
 from __future__ import annotations
