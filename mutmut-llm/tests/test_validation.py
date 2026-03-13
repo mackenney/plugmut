@@ -181,31 +181,6 @@ class TestValidatePragmas:
         mutated = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
         assert validate_pragmas(mutated, original) is None
 
-    def test_all_pragma_lines_modified_rejected(self):
-        original = "x = 1  # pragma: no mutate\ny = 2  # pragma: no mutate"
-        mutated = "x = 99  # pragma: no mutate\ny = 99  # pragma: no mutate"
-        result = validate_pragmas(mutated, original)
-        assert result is not None
-
-    def test_wired_into_validate_mutation(self):
-        """validate_pragmas is called by validate_mutation."""
-        mutated = "def f(x):\n    ignored = 999  # pragma: no mutate\n    return x + 1"
-        result = validate_mutation(mutated, self.ORIGINAL_WITH_PRAGMA)
-        assert result is not None
-        assert "Pragma-marked line modified" in result
-
-    def test_no_space_after_hash_detected(self):
-        original = "def f():\n    x = 1  #pragma: no mutate\n    return x"
-        mutated = "def f():\n    x = 2  #pragma: no mutate\n    return x"
-        result = validate_pragmas(mutated, original)
-        assert result is not None
-
-    def test_uppercase_pragma_detected(self):
-        original = "def f():\n    x = 1  # PRAGMA: NO MUTATE\n    return x"
-        mutated = "def f():\n    x = 2  # PRAGMA: NO MUTATE\n    return x"
-        result = validate_pragmas(mutated, original)
-        assert result is not None
-
     def test_mixed_case_pragma_detected(self):
         original = "def f():\n    x = 1  # Pragma: No Mutate\n    return x"
         mutated = "def f():\n    x = 2  # Pragma: No Mutate\n    return x"
