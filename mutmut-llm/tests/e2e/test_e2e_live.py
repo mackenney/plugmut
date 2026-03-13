@@ -19,7 +19,7 @@ import pytest
 from mutmut_llm.cache import list_cache_entries, source_hash
 from mutmut_llm.config import load_config
 from mutmut_llm.operators import _reset_cache_index
-from mutmut_llm.pipeline import _call_llm_and_validate, run_generation
+from mutmut_llm.pipeline import GenerationResult, _call_llm_and_validate, run_generation
 from mutmut_llm.scope import ScopeTarget
 from mutmut_llm.validation import validate_imports
 
@@ -112,15 +112,15 @@ class TestBasicResponseValidation:
     """Step 2: Verify the LLM returns structurally valid mutations."""
 
     def test_live_returns_mutations(self, live_generation_result):
-        assert isinstance(live_generation_result, list)
-        assert len(live_generation_result) > 0, "LLM returned no mutations"
+        assert isinstance(live_generation_result, GenerationResult)
+        assert len(live_generation_result.mutations) > 0, "LLM returned no mutations"
 
     def test_live_mutations_have_required_fields(self, live_generation_result):
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             assert "mutated_code" in m, f"Missing 'mutated_code' key in mutation: {m}"
 
     def test_live_mutations_have_descriptions(self, live_generation_result):
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             assert "description" in m, f"Missing 'description' key in mutation: {m}"
             assert isinstance(m["description"], str) and m["description"].strip(), (
                 f"Empty description in mutation: {m}"
@@ -128,8 +128,10 @@ class TestBasicResponseValidation:
 
     def test_live_mutation_count_within_budget(self, live_generation_result):
         config = load_config(env=os.environ)
-        assert len(live_generation_result) <= config.max_mutations_per_function, (
-            f"Got {len(live_generation_result)} mutations, "
+        assert (
+            len(live_generation_result.mutations) <= config.max_mutations_per_function
+        ), (
+            f"Got {len(live_generation_result.mutations)} mutations, "
             f"budget is {config.max_mutations_per_function}"
         )
 
@@ -139,12 +141,12 @@ class TestSyntaxAndValidation:
     """Step 3: Verify mutations pass the validation pipeline."""
 
     def test_live_mutations_parse(self, live_generation_result):
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             module = cst.parse_module(m["mutated_code"])
             assert module.body, f"Parsed module has empty body: {m['mutated_code']}"
 
     def test_live_mutations_are_functions(self, live_generation_result):
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             module = cst.parse_module(m["mutated_code"])
             func_defs = [
                 stmt for stmt in module.body if isinstance(stmt, cst.FunctionDef)
@@ -152,14 +154,14 @@ class TestSyntaxAndValidation:
             assert func_defs, f"No FunctionDef found in mutation:\n{m['mutated_code']}"
 
     def test_live_mutations_pass_import_validation(self, live_generation_result):
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             err = validate_imports(m["mutated_code"], SAMPLE_FUNCTION_SOURCE)
             assert err is None, (
                 f"Import validation failed: {err}\nCode: {m['mutated_code']}"
             )
 
     def test_live_mutations_differ_from_original(self, live_generation_result):
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             assert m["mutated_code"].strip() != SAMPLE_FUNCTION_SOURCE.strip(), (
                 "Mutation is identical to original source"
             )
@@ -175,13 +177,13 @@ class TestPromptQuality:
         original_no_ops = _strip_operators(SAMPLE_FUNCTION_SOURCE)
 
         non_trivial = 0
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             mutated_no_ops = _strip_operators(m["mutated_code"])
             if original_no_ops != mutated_no_ops:
                 non_trivial += 1
 
         assert non_trivial > 0, (
-            f"All {len(live_generation_result)} mutations are trivial operator swaps"
+            f"All {len(live_generation_result.mutations)} mutations are trivial operator swaps"
         )
 
     def test_live_mutations_preserve_function_signature(self, live_generation_result):
@@ -192,7 +194,7 @@ class TestPromptQuality:
         original_name = original_func.name.value
         original_params = original_module.code_for_node(original_func.params)
 
-        for m in live_generation_result:
+        for m in live_generation_result.mutations:
             mutated_module = cst.parse_module(m["mutated_code"])
             mutated_func = next(
                 (
@@ -302,7 +304,10 @@ class TestErrorHandling:
         )
 
         result = _call_llm_and_validate(client, config, target, 3)
-        assert result == [], f"Expected empty list for invalid key, got {result}"
+        assert isinstance(result, GenerationResult)
+        assert result.mutations == [], (
+            f"Expected empty mutations for invalid key, got {result.mutations}"
+        )
 
     def test_live_empty_function(self, live_generation_result):
         """Pass a trivial function — should handle gracefully."""
@@ -318,7 +323,7 @@ class TestErrorHandling:
         )
 
         result = _call_llm_and_validate(client, config, target, 3)
-        assert isinstance(result, list)
+        assert isinstance(result, GenerationResult)
 
 
 class _OperatorCollector(cst.CSTVisitor):
