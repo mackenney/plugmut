@@ -951,7 +951,7 @@ class TestCallLlmAndValidateAsync:
             file_path="f.py",
             function_name="f",
             source="def f(): return 1",
-            context=None,
+            context="",
         )
         config = LLMConfig(api_key="test-key")
         result = await _call_llm_and_validate_async(client, config, target, 3)
@@ -971,7 +971,7 @@ class TestCallLlmAndValidateAsync:
             file_path="f.py",
             function_name="f",
             source="def f(): return 1",
-            context=None,
+            context="",
         )
         config = LLMConfig(api_key="test-key")
 
@@ -996,7 +996,7 @@ class TestCallLlmAndValidateAsync:
             file_path="f.py",
             function_name="f",
             source="def f(): return 1",
-            context=None,
+            context="",
         )
         config = LLMConfig(api_key="test-key", request_timeout_seconds=10)
 
@@ -1019,7 +1019,7 @@ class TestCallLlmAndValidateAsync:
             file_path="f.py",
             function_name="f",
             source="def f(): return 1",
-            context=None,
+            context="",
         )
         config = LLMConfig(api_key="test-key")
         result = await _call_llm_and_validate_async(client, config, target, 3)
