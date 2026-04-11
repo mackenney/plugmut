@@ -347,3 +347,69 @@ def _call_llm_and_validate(
         cache_creation_tokens=cache_creation_tokens,
         cache_read_tokens=cache_read_tokens,
     )
+
+
+async def _call_llm_and_validate_async(
+    client,  # anthropic.AsyncAnthropic
+    config: LLMConfig,
+    target: ScopeTarget,
+    max_mutations: int,
+) -> GenerationResult:
+    """Async version of _call_llm_and_validate."""
+    system_blocks = build_system_with_context(context=target.context, ttl=config.cache_ttl)
+    user_prompt = build_user_prompt(function_source=target.source, max_mutations=max_mutations)
+
+    try:
+        response = await asyncio.wait_for(
+            client.messages.create(
+                model=config.model,
+                max_tokens=config.max_tokens,
+                temperature=config.temperature,
+                system=system_blocks,
+                messages=[{"role": "user", "content": user_prompt}],
+            ),
+            timeout=config.request_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        warnings.warn(
+            f"LLM API call timed out for {target.function_name}", stacklevel=2
+        )
+        raise
+
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+    cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) if usage else 0
+    cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) if usage else 0
+    cost_usd = calculate_cost(
+        config.model, input_tokens, output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
+    )
+
+    if response.stop_reason == "max_tokens":
+        warnings.warn(
+            f"Response truncated for {target.function_name} (hit max_tokens={config.max_tokens}). "
+            "Increase max_tokens or reduce max_mutations_per_function.",
+            stacklevel=2,
+        )
+
+    response_text = "".join(block.text for block in response.content if hasattr(block, "text"))
+    mutations = parse_llm_response(response_text)
+
+    valid: list[dict] = []
+    for m in mutations:
+        err = validate_mutation(m["mutated_code"], target.source)
+        if err:
+            click.echo(f"    Rejected: {err}")
+        else:
+            valid.append(m)
+
+    return GenerationResult(
+        mutations=valid,
+        cost_usd=cost_usd,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
+    )

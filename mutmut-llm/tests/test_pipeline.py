@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -983,3 +983,95 @@ class TestComputeConcurrency:
         from mutmut_llm.pipeline import _compute_concurrency
         # n=3, min=10, max=20: 3//3=1 < 10
         assert _compute_concurrency(3, self._cfg(min_c=10, max_c=20)) == 10
+
+
+class TestCallLlmAndValidateAsync:
+    async def test_valid_mutations_returned(self, tmp_path):
+        import asyncio
+        from mutmut_llm.pipeline import _call_llm_and_validate_async
+        from tests.conftest import make_async_mock_client, make_mock_response
+
+        mutations = [
+            {"mutated_code": "def f(): return 2", "description": "change constant"},
+        ]
+        client = make_async_mock_client([make_mock_response(mutations, input_tokens=100, output_tokens=50)])
+
+        target = ScopeTarget(
+            file_path="f.py",
+            function_name="f",
+            source="def f(): return 1",
+            context="",
+        )
+        config = LLMConfig(api_key="test-key")
+        result = await _call_llm_and_validate_async(client, config, target, 3)
+
+        assert len(result.mutations) == 1
+        assert result.mutations[0]["mutated_code"] == "def f(): return 2"
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+
+    async def test_truncated_response_warns(self):
+        from mutmut_llm.pipeline import _call_llm_and_validate_async
+        from tests.conftest import make_async_mock_client, make_mock_response
+        import warnings
+
+        client = make_async_mock_client([make_mock_response([], stop_reason="max_tokens")])
+        target = ScopeTarget(
+            file_path="f.py",
+            function_name="f",
+            source="def f(): return 1",
+            context="",
+        )
+        config = LLMConfig(api_key="test-key")
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            await _call_llm_and_validate_async(client, config, target, 3)
+
+        assert any("max_tokens" in str(warning.message) for warning in w)
+
+    async def test_timeout_raises(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from mutmut_llm.pipeline import _call_llm_and_validate_async
+
+        async def slow_create(**kwargs):
+            await asyncio.sleep(1000)
+
+        client = AsyncMock()
+        client.messages.create = AsyncMock(side_effect=slow_create)
+
+        target = ScopeTarget(
+            file_path="f.py",
+            function_name="f",
+            source="def f(): return 1",
+            context="",
+        )
+        config = LLMConfig(api_key="test-key", request_timeout_seconds=10)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                _call_llm_and_validate_async(client, config, target, 3),
+                timeout=0.1,
+            )
+
+    async def test_syntax_errors_rejected(self):
+        from mutmut_llm.pipeline import _call_llm_and_validate_async
+        from tests.conftest import make_async_mock_client, make_mock_response
+
+        mutations = [
+            {"mutated_code": "def f(): SYNTAX ERROR!!!", "description": "invalid"},
+            {"mutated_code": "def f(): return 2", "description": "valid"},
+        ]
+        client = make_async_mock_client([make_mock_response(mutations)])
+        target = ScopeTarget(
+            file_path="f.py",
+            function_name="f",
+            source="def f(): return 1",
+            context="",
+        )
+        config = LLMConfig(api_key="test-key")
+        result = await _call_llm_and_validate_async(client, config, target, 3)
+
+        assert len(result.mutations) == 1
+        assert result.mutations[0]["mutated_code"] == "def f(): return 2"
