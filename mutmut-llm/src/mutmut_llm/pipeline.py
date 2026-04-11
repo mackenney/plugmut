@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +29,27 @@ from mutmut_llm.prompts import (
 )
 from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
+
+
+class TrackedSemaphore:
+    """Semaphore that tracks the number of currently acquired slots."""
+
+    def __init__(self, value: int) -> None:
+        self._semaphore = asyncio.Semaphore(value)
+        self._in_flight = 0
+
+    @property
+    def in_flight(self) -> int:
+        return self._in_flight
+
+    async def __aenter__(self) -> "TrackedSemaphore":
+        await self._semaphore.acquire()
+        self._in_flight += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._in_flight -= 1
+        self._semaphore.release()
 
 
 @dataclass
