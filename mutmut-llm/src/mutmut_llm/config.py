@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -54,15 +55,23 @@ class LLMConfig:
                 f"Invalid cache_ttl={self.cache_ttl!r}. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
             )
         if self.min_concurrency < 1:
-            raise ValueError(f"min_concurrency must be >= 1, got {self.min_concurrency}")
+            raise ValueError(
+                f"min_concurrency must be >= 1, got {self.min_concurrency}"
+            )
         if self.max_concurrency < self.min_concurrency:
-            raise ValueError(f"max_concurrency must be >= min_concurrency, got max={self.max_concurrency} < min={self.min_concurrency}")
+            raise ValueError(
+                f"max_concurrency must be >= min_concurrency, got max={self.max_concurrency} < min={self.min_concurrency}"
+            )
         if self.max_retries < 0:
             raise ValueError(f"max_retries must be >= 0, got {self.max_retries}")
         if self.base_backoff_seconds <= 0:
-            raise ValueError(f"base_backoff_seconds must be > 0, got {self.base_backoff_seconds}")
+            raise ValueError(
+                f"base_backoff_seconds must be > 0, got {self.base_backoff_seconds}"
+            )
         if self.request_timeout_seconds < 10:
-            raise ValueError(f"request_timeout_seconds must be >= 10, got {self.request_timeout_seconds}")
+            raise ValueError(
+                f"request_timeout_seconds must be >= 10, got {self.request_timeout_seconds}"
+            )
 
     @property
     def is_configured(self) -> bool:
@@ -89,7 +98,7 @@ def read_toml_section(path: Path) -> dict:
 def load_config(
     *,
     pyproject_path: Path | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> LLMConfig:
     """Build an ``LLMConfig`` from pyproject.toml + environment.
 

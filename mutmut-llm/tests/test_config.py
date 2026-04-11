@@ -333,7 +333,9 @@ class TestLLMConfigNewFields:
             LLMConfig(min_concurrency=-1)
 
     def test_max_concurrency_less_than_min_raises(self):
-        with pytest.raises(ValueError, match="max_concurrency must be >= min_concurrency"):
+        with pytest.raises(
+            ValueError, match="max_concurrency must be >= min_concurrency"
+        ):
             LLMConfig(min_concurrency=10, max_concurrency=5)
 
     def test_max_concurrency_equal_to_min_ok(self):
@@ -381,6 +383,7 @@ class TestLLMConfigNewFields:
 
     def test_load_config_reads_new_fields(self, tmp_path):
         from mutmut_llm.config import load_config
+
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""
 [tool.mutmut.llm]
