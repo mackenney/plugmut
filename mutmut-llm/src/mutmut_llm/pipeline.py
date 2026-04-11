@@ -122,6 +122,11 @@ def _sigint_handler(cancel_event: "asyncio.Event"):
 
 
 
+def _compute_concurrency(n_targets: int, config: "LLMConfig") -> int:
+    """Dynamic concurrency: n_targets // 3, clamped to [min_concurrency, max_concurrency]."""
+    return max(config.min_concurrency, min(n_targets // 3, config.max_concurrency))
+
+
 @dataclass
 class GenerationResult:
     mutations: list[dict]

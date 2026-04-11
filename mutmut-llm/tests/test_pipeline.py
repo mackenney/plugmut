@@ -934,3 +934,52 @@ class TestSigintHandler:
             pass
         restored = signal.getsignal(signal.SIGINT)
         assert restored == original
+
+
+class TestComputeConcurrency:
+    def _cfg(self, min_c=5, max_c=20):
+        from mutmut_llm.config import LLMConfig
+        return LLMConfig(min_concurrency=min_c, max_concurrency=max_c)
+
+    def test_zero_targets_returns_min(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        assert _compute_concurrency(0, self._cfg()) == 5
+
+    def test_one_target_returns_min(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        assert _compute_concurrency(1, self._cfg()) == 5
+
+    def test_six_targets_clamped_to_min(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # 6//3=2 < 5
+        assert _compute_concurrency(6, self._cfg()) == 5
+
+    def test_fifteen_targets_equals_min(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # 15//3=5 == min
+        assert _compute_concurrency(15, self._cfg()) == 5
+
+    def test_thirty_targets_returns_ten(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # 30//3=10
+        assert _compute_concurrency(30, self._cfg()) == 10
+
+    def test_sixty_targets_equals_max(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # 60//3=20 == max
+        assert _compute_concurrency(60, self._cfg()) == 20
+
+    def test_ninety_targets_clamped_to_max(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # 90//3=30 > 20
+        assert _compute_concurrency(90, self._cfg()) == 20
+
+    def test_custom_min_max_clamped_to_max(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # n=30, min=1, max=5: 30//3=10 > 5
+        assert _compute_concurrency(30, self._cfg(min_c=1, max_c=5)) == 5
+
+    def test_custom_min_max_clamped_to_min(self):
+        from mutmut_llm.pipeline import _compute_concurrency
+        # n=3, min=10, max=20: 3//3=1 < 10
+        assert _compute_concurrency(3, self._cfg(min_c=10, max_c=20)) == 10
