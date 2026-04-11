@@ -173,8 +173,10 @@ def run_generation(
             click.echo(f"  {t.file_path}::{t.function_name} (budget: {n})")
         return 0
 
-    return _generate_mutations(
-        config, scope.targets, scope.budget_per_target, budget, base_dir
+    return asyncio.run(
+        _generate_mutations_async(
+            config, scope.targets, scope.budget_per_target, budget, base_dir
+        )
     )
 
 
@@ -185,96 +187,10 @@ def _generate_mutations(
     total_budget: int,
     base_dir: Path | None,
 ) -> int:
-    """Call LLM for each uncached function. Returns API call count."""
-    effective_base = base_dir or Path(".")
-    clean_stale_temps(effective_base / CACHE_DIR)
-
-    try:
-        import anthropic
-    except ImportError:
-        click.echo(
-            "Error: anthropic package not installed. Install with: pip install mutmut-llm"
-        )
-        return 0
-
-    client = anthropic.Anthropic(api_key=config.api_key)
-    api_calls = 0
-    total_mutations = 0
-    total_cost = 0.0
-    total_input = 0
-    total_cache_read = 0
-    total_cache_write = 0
-    cache_kwargs = {"base_dir": base_dir} if base_dir else {}
-
-    sorted_targets = sorted(targets, key=lambda t: t.file_path)
-
-    for target in sorted_targets:
-        if api_calls >= total_budget:
-            click.echo(f"\nBudget of {total_budget} API calls reached.")
-            break
-
-        src_hash = source_hash(target.source)
-        cached = read_cache_entry(
-            target.file_path,
-            target.function_name,
-            src_hash,
-            model=config.model,
-            **cache_kwargs,
-        )
-        if cached is not None:
-            click.echo(
-                f"  {target.file_path}::{target.function_name} — cached ({len(cached.mutations)} mutations)"
-            )
-            continue
-
-        max_mutations = budget_per_target.get(
-            f"{target.file_path}::{target.function_name}",
-            config.max_mutations_per_function,
-        )
-        click.echo(f"  {target.file_path}::{target.function_name} — generating...")
-
-        result = _call_llm_and_validate(client, config, target, max_mutations)
-        api_calls += 1
-        total_mutations += len(result.mutations)
-        total_cost += result.cost_usd
-        total_input += result.input_tokens
-        total_cache_read += result.cache_read_tokens
-        total_cache_write += result.cache_creation_tokens
-
-        entry = CacheEntry(
-            function_name=target.function_name,
-            file_path=target.file_path,
-            source_hash=src_hash,
-            mutations=[
-                CachedMutation(
-                    mutated_code=m["mutated_code"], description=m.get("description", "")
-                )
-                for m in result.mutations
-            ],
-            model=config.model,
-            cost_usd=result.cost_usd,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            cache_creation_tokens=result.cache_creation_tokens,
-            cache_read_tokens=result.cache_read_tokens,
-            generated_at=datetime.now(timezone.utc).isoformat(),
-        )
-        write_cache_entry(entry, **cache_kwargs)
-
-    from mutmut_llm.pricing import format_cost
-
-    cost_str = f" ({format_cost(total_cost)})" if total_cost > 0 else ""
-    click.echo(
-        f"\nDone. {api_calls} API calls, {total_mutations} mutations generated.{cost_str}"
+    """Sync wrapper around _generate_mutations_async for backward compatibility."""
+    return asyncio.run(
+        _generate_mutations_async(config, targets, budget_per_target, total_budget, base_dir)
     )
-    if total_cache_read > 0:
-        total_all_input = total_input + total_cache_read + total_cache_write
-        if total_all_input > 0:
-            pct = total_cache_read / total_all_input * 100
-            click.echo(
-                f"Cache hit rate: {pct:.0f}% ({total_cache_read} tokens read from cache)"
-            )
-    return api_calls
 
 
 def _call_llm_and_validate(

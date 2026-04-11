@@ -1,5 +1,5 @@
 {
   "typecheck": {
-    "*.py": "ty check --python ../.venv {file}"
+    "*.py": "ty check --python /home/ignacio/pr/mutmut2/.venv {file}"
   }
 }
