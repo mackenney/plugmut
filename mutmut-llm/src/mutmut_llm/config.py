@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -42,11 +43,34 @@ class LLMConfig:
     temperature: float = 0.6
     enabled: bool = True
     cache_ttl: str = "5m"
+    min_concurrency: int = 5
+    max_concurrency: int = 20
+    max_retries: int = 3
+    base_backoff_seconds: float = 1.0
+    request_timeout_seconds: int = 120
 
     def __post_init__(self) -> None:
         if self.cache_ttl not in _VALID_CACHE_TTLS:
             raise ValueError(
                 f"Invalid cache_ttl={self.cache_ttl!r}. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
+            )
+        if self.min_concurrency < 1:
+            raise ValueError(
+                f"min_concurrency must be >= 1, got {self.min_concurrency}"
+            )
+        if self.max_concurrency < self.min_concurrency:
+            raise ValueError(
+                f"max_concurrency must be >= min_concurrency, got max={self.max_concurrency} < min={self.min_concurrency}"
+            )
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {self.max_retries}")
+        if self.base_backoff_seconds <= 0:
+            raise ValueError(
+                f"base_backoff_seconds must be > 0, got {self.base_backoff_seconds}"
+            )
+        if self.request_timeout_seconds < 10:
+            raise ValueError(
+                f"request_timeout_seconds must be >= 10, got {self.request_timeout_seconds}"
             )
 
     @property
@@ -74,7 +98,7 @@ def read_toml_section(path: Path) -> dict:
 def load_config(
     *,
     pyproject_path: Path | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> LLMConfig:
     """Build an ``LLMConfig`` from pyproject.toml + environment.
 
@@ -110,6 +134,16 @@ def load_config(
                     f"Invalid cache_ttl={ttl!r} in pyproject.toml. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
                 )
             config.cache_ttl = ttl
+        if "min_concurrency" in section:
+            config.min_concurrency = int(section["min_concurrency"])
+        if "max_concurrency" in section:
+            config.max_concurrency = int(section["max_concurrency"])
+        if "max_retries" in section:
+            config.max_retries = int(section["max_retries"])
+        if "base_backoff_seconds" in section:
+            config.base_backoff_seconds = float(section["base_backoff_seconds"])
+        if "request_timeout_seconds" in section:
+            config.request_timeout_seconds = int(section["request_timeout_seconds"])
 
     if not 0.0 <= config.temperature <= 1.0:
         raise ValueError(f"temperature must be in [0.0, 1.0], got {config.temperature}")
