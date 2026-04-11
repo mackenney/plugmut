@@ -63,8 +63,8 @@ class TestRunGeneration:
         assert "greet" in output
         assert "add" in output
 
-    @patch("anthropic.Anthropic")
-    def test_generates_and_caches(self, MockAnthropic, sample_project, capsys):
+    @patch("anthropic.AsyncAnthropic")
+    def test_generates_and_caches(self, MockAsyncAnthropic, sample_project, capsys):
         tmp_path, src = sample_project
         config = _config()
 
@@ -74,9 +74,9 @@ class TestRunGeneration:
                 "description": "swap greeting",
             },
         ]
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
+        MockAsyncAnthropic.return_value = mock_client
 
         result = run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
 
@@ -86,8 +86,8 @@ class TestRunGeneration:
         # Verify the mock was used (no real API calls)
         assert mock_client.messages.create.call_count > 0
 
-    @patch("anthropic.Anthropic")
-    def test_skips_cached_functions(self, MockAnthropic, sample_project, capsys):
+    @patch("anthropic.AsyncAnthropic")
+    def test_skips_cached_functions(self, MockAsyncAnthropic, sample_project, capsys):
         tmp_path, src = sample_project
         config = _config()
 
@@ -97,9 +97,9 @@ class TestRunGeneration:
                 "description": "simplify",
             }
         ]
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
+        MockAsyncAnthropic.return_value = mock_client
 
         # First run: generates
         run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
@@ -114,17 +114,17 @@ class TestRunGeneration:
         # Second run should make fewer API calls (cached entries skipped)
         assert second_call_count < first_call_count
 
-    @patch("anthropic.Anthropic")
-    def test_budget_limits_api_calls(self, MockAnthropic, sample_project, capsys):
+    @patch("anthropic.AsyncAnthropic")
+    def test_budget_limits_api_calls(self, MockAsyncAnthropic, sample_project, capsys):
         tmp_path, src = sample_project
         config = _config()
 
         mutations = [
             {"mutated_code": "def greet(name):\n    return 'x'", "description": "d"}
         ]
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
+        MockAsyncAnthropic.return_value = mock_client
 
         result = run_generation(config, paths=[str(src)], budget=1, base_dir=tmp_path)
 
@@ -306,8 +306,8 @@ class TestCallLlmAndValidate:
 
 
 class TestMultiModelGeneration:
-    @patch("anthropic.Anthropic")
-    def test_generate_skips_cached_model(self, MockAnthropic, sample_project, capsys):
+    @patch("anthropic.AsyncAnthropic")
+    def test_generate_skips_cached_model(self, MockAsyncAnthropic, sample_project, capsys):
         """Second run with same model makes zero API calls."""
         tmp_path, src = sample_project
         config = _config()
@@ -318,9 +318,9 @@ class TestMultiModelGeneration:
                 "description": "simplify",
             }
         ]
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
+        MockAsyncAnthropic.return_value = mock_client
 
         run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
         first_count = mock_client.messages.create.call_count
@@ -330,8 +330,8 @@ class TestMultiModelGeneration:
 
         assert mock_client.messages.create.call_count == 0
 
-    @patch("anthropic.Anthropic")
-    def test_generate_runs_for_new_model(self, MockAnthropic, sample_project, capsys):
+    @patch("anthropic.AsyncAnthropic")
+    def test_generate_runs_for_new_model(self, MockAsyncAnthropic, sample_project, capsys):
         """Switching model generates new entries; old model's entries remain on disk."""
         tmp_path, src = sample_project
 
@@ -341,9 +341,9 @@ class TestMultiModelGeneration:
                 "description": "simplify",
             }
         ]
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
+        MockAsyncAnthropic.return_value = mock_client
 
         config_a = LLMConfig(
             api_key="test-key",
@@ -411,8 +411,8 @@ class TestCostTracking:
         assert result.input_tokens == 0
         assert result.output_tokens == 0
 
-    @patch("anthropic.Anthropic")
-    def test_cost_stored_in_cache_entry(self, MockAnthropic, sample_project):
+    @patch("anthropic.AsyncAnthropic")
+    def test_cost_stored_in_cache_entry(self, MockAsyncAnthropic, sample_project):
         tmp_path, src = sample_project
         config = _config()
 
@@ -422,9 +422,9 @@ class TestCostTracking:
                 "description": "swap greeting",
             },
         ]
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
+        MockAsyncAnthropic.return_value = mock_client
 
         run_generation(config, paths=[str(src)], budget=10, base_dir=tmp_path)
 
@@ -519,10 +519,10 @@ class TestPromptCaching:
 
         mutations = [{"mutated_code": "def x(): return 1", "description": "d"}]
 
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = _make_mock_response(mutations)
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(mutations))
 
-        with patch("anthropic.Anthropic", return_value=mock_client):
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
             config = _config()
             _generate_mutations(
                 config, targets, budget_per_target, total_budget=10, base_dir=tmp_path
@@ -536,9 +536,9 @@ class TestPromptCaching:
             user_msg = kwargs["messages"][0]["content"]
             system_texts.append(user_msg)
 
-        assert "def a" in system_texts[0]
-        assert "def m" in system_texts[1]
-        assert "def z" in system_texts[2]
+        assert any("def a" in t for t in system_texts)
+        assert any("def m" in t for t in system_texts)
+        assert any("def z" in t for t in system_texts)
 
     def test_generation_result_has_cache_fields(self):
         result = GenerationResult(
@@ -549,9 +549,9 @@ class TestPromptCaching:
         assert result.cache_creation_tokens == 100
         assert result.cache_read_tokens == 200
 
-    @patch("anthropic.Anthropic")
+    @patch("anthropic.AsyncAnthropic")
     def test_cache_hit_rate_includes_uncached_input_in_denominator(
-        self, MockAnthropic, sample_project, capsys
+        self, MockAsyncAnthropic, sample_project, capsys
     ):
         """Cache hit % must account for uncached input_tokens, not just cache tokens."""
         tmp_path, src = sample_project
@@ -568,9 +568,9 @@ class TestPromptCaching:
         )
         mock_response.usage.input_tokens = 600
 
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        MockAnthropic.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        MockAsyncAnthropic.return_value = mock_client
 
         run_generation(config, paths=[str(src)], budget=1, base_dir=tmp_path)
 
@@ -672,18 +672,18 @@ class TestCacheHitLogging:
         """When no cache tokens at all, cache hit line should not appear."""
         from mutmut_llm.pipeline import _generate_mutations
 
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
-        mock_client.messages.create.return_value = _make_mock_response(
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(
             mutations, cache_creation_input_tokens=0, cache_read_input_tokens=0
-        )
+        ))
 
         targets = [
             ScopeTarget(file_path="t.py", function_name="f", source="def f(): pass\n")
         ]
         budget = {"t.py::f": 3}
 
-        with patch("anthropic.Anthropic", return_value=mock_client):
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
             _generate_mutations(
                 _config(), targets, budget, total_budget=10, base_dir=tmp_path
             )
@@ -694,21 +694,21 @@ class TestCacheHitLogging:
     def test_all_cache_read_shows_100_percent(self, tmp_path, capsys):
         from mutmut_llm.pipeline import _generate_mutations
 
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
-        mock_client.messages.create.return_value = _make_mock_response(
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(
             mutations,
             input_tokens=0,
             cache_creation_input_tokens=0,
             cache_read_input_tokens=500,
-        )
+        ))
 
         targets = [
             ScopeTarget(file_path="t.py", function_name="f", source="def f(): pass\n")
         ]
         budget = {"t.py::f": 3}
 
-        with patch("anthropic.Anthropic", return_value=mock_client):
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
             _generate_mutations(
                 _config(), targets, budget, total_budget=10, base_dir=tmp_path
             )
@@ -719,20 +719,20 @@ class TestCacheHitLogging:
     def test_mixed_cache_shows_correct_percentage(self, tmp_path, capsys):
         from mutmut_llm.pipeline import _generate_mutations
 
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         mutations = [{"mutated_code": "def f(): return 1", "description": "d"}]
-        mock_client.messages.create.return_value = _make_mock_response(
+        mock_client.messages.create = AsyncMock(return_value=_make_mock_response(
             mutations,
             cache_creation_input_tokens=250,
             cache_read_input_tokens=750,
-        )
+        ))
 
         targets = [
             ScopeTarget(file_path="t.py", function_name="f", source="def f(): pass\n")
         ]
         budget = {"t.py::f": 3}
 
-        with patch("anthropic.Anthropic", return_value=mock_client):
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
             _generate_mutations(
                 _config(), targets, budget, total_budget=10, base_dir=tmp_path
             )
