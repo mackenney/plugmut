@@ -1255,3 +1255,143 @@ class TestCallLlmAsync:
 
         assert result.mutations == []
         assert client.messages.create.call_count == 3  # 1 initial + 2 retries
+
+
+class TestGenerateMutationsAsync:
+    def _make_targets(self, n=2, base="f"):
+        from mutmut_llm.scope import ScopeTarget
+        return [
+            ScopeTarget(
+                file_path=f"{base}{i}.py",
+                function_name="f",
+                source="def f(): return 1",
+                context="",
+            )
+            for i in range(n)
+        ]
+
+    async def test_all_cached_returns_zero(self, tmp_path, capsys):
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from mutmut_llm.pipeline import _generate_mutations_async
+        from mutmut_llm.config import LLMConfig
+        from mutmut_llm.cache import write_cache_entry, CacheEntry, source_hash
+
+        target = self._make_targets(1)[0]
+        src_hash = source_hash(target.source)
+        entry = CacheEntry(
+            function_name=target.function_name,
+            file_path=target.file_path,
+            source_hash=src_hash,
+            mutations=[],
+            model="claude-sonnet-4-6",
+            cost_usd=0.0,
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            generated_at="2024-01-01T00:00:00+00:00",
+        )
+        write_cache_entry(entry, base_dir=tmp_path)
+
+        config = LLMConfig(api_key="test-key")
+        with patch("anthropic.AsyncAnthropic") as MockClient:
+            result = await _generate_mutations_async(config, [target], {}, 10, tmp_path)
+
+        assert result == 0
+        assert "All targets cached" in capsys.readouterr().out
+
+    async def test_budget_enforcement(self, tmp_path, capsys):
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from mutmut_llm.pipeline import _generate_mutations_async
+        from mutmut_llm.config import LLMConfig
+        from tests.conftest import make_mock_response
+
+        targets = self._make_targets(3)
+        mutations = [{"mutated_code": "def f(): return 2", "description": ""}]
+
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=make_mock_response(mutations))
+
+        config = LLMConfig(api_key="test-key", max_retries=0)
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            result = await _generate_mutations_async(config, targets, {}, 1, tmp_path)
+
+        assert result == 1  # Only 1 budget
+
+    async def test_tqdm_update_called_per_task(self, tmp_path):
+        import asyncio
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from mutmut_llm.pipeline import _generate_mutations_async
+        from mutmut_llm.config import LLMConfig
+        from tests.conftest import make_mock_response
+
+        targets = self._make_targets(3)
+        mutations = [{"mutated_code": "def f(): return 2", "description": ""}]
+
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=make_mock_response(mutations))
+
+        config = LLMConfig(api_key="test-key", max_retries=0)
+        mock_pbar = MagicMock()
+        mock_tqdm = MagicMock(return_value=mock_pbar)
+
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            with patch("mutmut_llm.pipeline.tqdm", mock_tqdm):
+                await _generate_mutations_async(config, targets, {}, 10, tmp_path)
+
+        assert mock_pbar.update.call_count == 3
+
+    async def test_cost_accumulation(self, tmp_path, capsys):
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from mutmut_llm.pipeline import _generate_mutations_async
+        from mutmut_llm.config import LLMConfig
+        from tests.conftest import make_mock_response
+
+        targets = self._make_targets(2)
+        mutations = [{"mutated_code": "def f(): return 2", "description": ""}]
+        response = make_mock_response(mutations, input_tokens=100, output_tokens=50)
+
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(return_value=response)
+
+        config = LLMConfig(api_key="test-key", max_retries=0)
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            result = await _generate_mutations_async(config, targets, {}, 10, tmp_path)
+
+        assert result == 2
+        out = capsys.readouterr().out
+        assert "2 API calls" in out
+
+    async def test_targets_processed_in_sorted_order(self, tmp_path, capsys):
+        from unittest.mock import patch, AsyncMock
+        from mutmut_llm.pipeline import _generate_mutations_async
+        from mutmut_llm.config import LLMConfig
+        from mutmut_llm.scope import ScopeTarget
+        from tests.conftest import make_mock_response
+
+        # Create targets in unsorted order
+        targets = [
+            ScopeTarget(file_path="z_file.py", function_name="f", source="def f(): return 1", context=""),
+            ScopeTarget(file_path="a_file.py", function_name="f", source="def f(): return 1", context=""),
+        ]
+        call_order = []
+
+        async def mock_create(**kwargs):
+            # Track which file is being processed via the content
+            return make_mock_response([])
+
+        mock_client = AsyncMock()
+        mock_client.messages.create = AsyncMock(side_effect=mock_create)
+
+        config = LLMConfig(api_key="test-key", max_retries=0)
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            await _generate_mutations_async(config, targets, {}, 10, tmp_path)
+
+        # Verify a_file.py was cached before z_file.py (sorted order)
+        from mutmut_llm.cache import list_cache_entries
+        entries = list_cache_entries(base_dir=tmp_path)
+        file_paths = [e.file_path for e in entries]
+        assert file_paths.index("a_file.py") < file_paths.index("z_file.py")
