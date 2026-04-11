@@ -837,3 +837,58 @@ class TestErrorClassifier:
 
         exc = ValueError("unexpected")
         assert classify_error(exc) == ErrorAction.SKIP
+
+
+class TestTrackedSemaphore:
+    async def test_in_flight_starts_at_zero(self):
+        from mutmut_llm.pipeline import TrackedSemaphore
+        sem = TrackedSemaphore(5)
+        assert sem.in_flight == 0
+
+    async def test_in_flight_tracking(self):
+        from mutmut_llm.pipeline import TrackedSemaphore
+        sem = TrackedSemaphore(2)
+        assert sem.in_flight == 0
+
+        async with sem:
+            assert sem.in_flight == 1
+            async with sem:
+                assert sem.in_flight == 2
+            assert sem.in_flight == 1
+        assert sem.in_flight == 0
+
+    async def test_max_concurrency_enforced(self):
+        import asyncio
+        from mutmut_llm.pipeline import TrackedSemaphore
+        sem = TrackedSemaphore(2)
+        acquired = []
+        released = asyncio.Event()
+
+        async def worker():
+            async with sem:
+                acquired.append(1)
+                await released.wait()
+
+        tasks = [asyncio.create_task(worker()) for _ in range(3)]
+        await asyncio.sleep(0.05)
+        assert len(acquired) == 2
+        assert sem.in_flight == 2
+        released.set()
+        await asyncio.gather(*tasks)
+        assert sem.in_flight == 0
+
+    async def test_in_flight_accurate_under_concurrent_access(self):
+        import asyncio
+        from mutmut_llm.pipeline import TrackedSemaphore
+        sem = TrackedSemaphore(5)
+        max_seen = 0
+
+        async def worker():
+            nonlocal max_seen
+            async with sem:
+                max_seen = max(max_seen, sem.in_flight)
+                await asyncio.sleep(0.01)
+
+        await asyncio.gather(*[worker() for _ in range(10)])
+        assert max_seen <= 5
+        assert sem.in_flight == 0
