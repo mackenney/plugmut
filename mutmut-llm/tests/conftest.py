@@ -56,3 +56,19 @@ def make_mock_response(
         cache_read_input_tokens=cache_read_input_tokens,
     )
     return response
+
+
+def make_async_mock_client(responses=None):
+    """Create a mock AsyncAnthropic client.
+
+    Args:
+        responses: List of responses for messages.create. If None, returns empty mutations.
+                   Can contain exceptions to simulate failures.
+    """
+    from unittest.mock import AsyncMock
+    client = AsyncMock()
+    if responses:
+        client.messages.create = AsyncMock(side_effect=responses)
+    else:
+        client.messages.create = AsyncMock(return_value=make_mock_response([]))
+    return client
