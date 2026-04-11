@@ -892,3 +892,45 @@ class TestTrackedSemaphore:
         await asyncio.gather(*[worker() for _ in range(10)])
         assert max_seen <= 5
         assert sem.in_flight == 0
+
+
+class TestSigintHandler:
+    def test_sigint_sets_cancel_event(self):
+        import asyncio
+        import os
+        import signal
+        from mutmut_llm.pipeline import _sigint_handler
+
+        cancel_event = asyncio.Event()
+        with _sigint_handler(cancel_event):
+            assert not cancel_event.is_set()
+            os.kill(os.getpid(), signal.SIGINT)
+            assert cancel_event.is_set()
+
+    def test_old_handler_restored(self):
+        import asyncio
+        import signal
+        from mutmut_llm.pipeline import _sigint_handler
+
+        original = signal.getsignal(signal.SIGINT)
+        cancel_event = asyncio.Event()
+        with _sigint_handler(cancel_event):
+            current = signal.getsignal(signal.SIGINT)
+            assert current != original
+        restored = signal.getsignal(signal.SIGINT)
+        assert restored == original
+
+    def test_handler_restored_on_exception(self):
+        import asyncio
+        import signal
+        from mutmut_llm.pipeline import _sigint_handler
+
+        original = signal.getsignal(signal.SIGINT)
+        cancel_event = asyncio.Event()
+        try:
+            with _sigint_handler(cancel_event):
+                raise RuntimeError("test error")
+        except RuntimeError:
+            pass
+        restored = signal.getsignal(signal.SIGINT)
+        assert restored == original

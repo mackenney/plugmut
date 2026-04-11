@@ -1,0 +1,5 @@
+{
+  "typecheck": {
+    "*.py": "ty check --python ../.venv {file}"
+  }
+}

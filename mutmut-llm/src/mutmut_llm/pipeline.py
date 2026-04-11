@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import signal
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone
@@ -103,6 +105,21 @@ class TrackedSemaphore:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         self._in_flight -= 1
         self._semaphore.release()
+
+
+@contextmanager
+def _sigint_handler(cancel_event: "asyncio.Event"):
+    """Context manager that installs a SIGINT handler setting cancel_event."""
+
+    def handler(signum, frame):
+        cancel_event.set()
+
+    old_handler = signal.signal(signal.SIGINT, handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+
 
 
 @dataclass
