@@ -313,3 +313,86 @@ class TestTTLValidation:
         pyproject.write_text('[tool.mutmut.llm]\ncache_ttl = "10m"\n')
         with pytest.raises(ValueError, match="Invalid cache_ttl"):
             load_config(pyproject_path=pyproject, env={})
+
+
+class TestLLMConfigNewFields:
+    def test_defaults(self):
+        c = LLMConfig()
+        assert c.min_concurrency == 5
+        assert c.max_concurrency == 20
+        assert c.max_retries == 3
+        assert c.base_backoff_seconds == 1.0
+        assert c.request_timeout_seconds == 120
+
+    def test_min_concurrency_zero_raises(self):
+        with pytest.raises(ValueError, match="min_concurrency must be >= 1"):
+            LLMConfig(min_concurrency=0)
+
+    def test_min_concurrency_negative_raises(self):
+        with pytest.raises(ValueError, match="min_concurrency must be >= 1"):
+            LLMConfig(min_concurrency=-1)
+
+    def test_max_concurrency_less_than_min_raises(self):
+        with pytest.raises(ValueError, match="max_concurrency must be >= min_concurrency"):
+            LLMConfig(min_concurrency=10, max_concurrency=5)
+
+    def test_max_concurrency_equal_to_min_ok(self):
+        c = LLMConfig(min_concurrency=5, max_concurrency=5)
+        assert c.min_concurrency == 5
+        assert c.max_concurrency == 5
+
+    def test_max_retries_negative_raises(self):
+        with pytest.raises(ValueError, match="max_retries must be >= 0"):
+            LLMConfig(max_retries=-1)
+
+    def test_max_retries_zero_ok(self):
+        c = LLMConfig(max_retries=0)
+        assert c.max_retries == 0
+
+    def test_base_backoff_zero_raises(self):
+        with pytest.raises(ValueError, match="base_backoff_seconds must be > 0"):
+            LLMConfig(base_backoff_seconds=0)
+
+    def test_base_backoff_negative_raises(self):
+        with pytest.raises(ValueError, match="base_backoff_seconds must be > 0"):
+            LLMConfig(base_backoff_seconds=-1.0)
+
+    def test_request_timeout_too_small_raises(self):
+        with pytest.raises(ValueError, match="request_timeout_seconds must be >= 10"):
+            LLMConfig(request_timeout_seconds=5)
+
+    def test_request_timeout_exactly_10_ok(self):
+        c = LLMConfig(request_timeout_seconds=10)
+        assert c.request_timeout_seconds == 10
+
+    def test_valid_custom_values(self):
+        c = LLMConfig(
+            min_concurrency=2,
+            max_concurrency=15,
+            max_retries=5,
+            base_backoff_seconds=2.5,
+            request_timeout_seconds=60,
+        )
+        assert c.min_concurrency == 2
+        assert c.max_concurrency == 15
+        assert c.max_retries == 5
+        assert c.base_backoff_seconds == 2.5
+        assert c.request_timeout_seconds == 60
+
+    def test_load_config_reads_new_fields(self, tmp_path):
+        from mutmut_llm.config import load_config
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[tool.mutmut.llm]
+min_concurrency = 3
+max_concurrency = 12
+max_retries = 2
+base_backoff_seconds = 0.5
+request_timeout_seconds = 30
+""")
+        config = load_config(pyproject_path=pyproject)
+        assert config.min_concurrency == 3
+        assert config.max_concurrency == 12
+        assert config.max_retries == 2
+        assert config.base_backoff_seconds == 0.5
+        assert config.request_timeout_seconds == 30
