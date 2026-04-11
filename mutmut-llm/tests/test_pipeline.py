@@ -740,3 +740,100 @@ class TestCacheHitLogging:
         output = capsys.readouterr().out
         # 750 / (100 input + 750 cache_read + 250 cache_write) = 68%
         assert "Cache hit rate: 68%" in output
+
+
+class TestErrorClassifier:
+    def _make_api_exc(self, cls, message="error", status_code=400):
+        """Construct an Anthropic HTTP exception."""
+        import anthropic
+
+        response = MagicMock()
+        response.status_code = status_code
+        response.headers = {}
+        return cls(message=message, response=response, body=None)
+
+    def test_authentication_error_stops(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.AuthenticationError, status_code=401)
+        assert classify_error(exc) == ErrorAction.STOP
+
+    def test_permission_denied_stops(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.PermissionDeniedError, status_code=403)
+        assert classify_error(exc) == ErrorAction.STOP
+
+    def test_rate_limit_retries(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.RateLimitError, message="rate limit hit", status_code=429)
+        assert classify_error(exc) == ErrorAction.RETRY
+
+    def test_rate_limit_with_spending_limit_stops(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.RateLimitError, message="spending limit exceeded", status_code=429)
+        assert classify_error(exc) == ErrorAction.STOP
+
+    def test_rate_limit_with_credit_stops(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.RateLimitError, message="insufficient credit", status_code=429)
+        assert classify_error(exc) == ErrorAction.STOP
+
+    def test_internal_server_error_retries(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.InternalServerError, status_code=500)
+        assert classify_error(exc) == ErrorAction.RETRY
+
+    def test_timeout_retries(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = anthropic.APITimeoutError(request=MagicMock())
+        assert classify_error(exc) == ErrorAction.RETRY
+
+    def test_connection_error_retries(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = anthropic.APIConnectionError(request=MagicMock())
+        assert classify_error(exc) == ErrorAction.RETRY
+
+    def test_bad_request_skips(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.BadRequestError, status_code=400)
+        assert classify_error(exc) == ErrorAction.SKIP
+
+    def test_not_found_skips(self):
+        import anthropic
+
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = self._make_api_exc(anthropic.NotFoundError, status_code=404)
+        assert classify_error(exc) == ErrorAction.SKIP
+
+    def test_unknown_exception_skips(self):
+        from mutmut_llm.pipeline import ErrorAction, classify_error
+
+        exc = ValueError("unexpected")
+        assert classify_error(exc) == ErrorAction.SKIP

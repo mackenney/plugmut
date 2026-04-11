@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +29,58 @@ from mutmut_llm.prompts import (
 )
 from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
+
+
+class ErrorAction(enum.Enum):
+    RETRY = "retry"  # Transient error, retry with backoff
+    SKIP = "skip"    # Permanent error for this target, move on
+    STOP = "stop"    # Fatal error, cancel all remaining work
+
+
+_QUOTA_KEYWORDS = frozenset({
+    "credit",
+    "billing",
+    "spending limit",
+    "payment",
+    "insufficient funds",
+    "quota exceeded",
+})
+
+
+def classify_error(exc: Exception) -> ErrorAction:
+    """Classify an API exception into a retry action."""
+    import anthropic
+
+    if isinstance(exc, anthropic.AuthenticationError):
+        return ErrorAction.STOP
+
+    if isinstance(exc, anthropic.PermissionDeniedError):
+        return ErrorAction.STOP
+
+    if isinstance(exc, anthropic.RateLimitError):
+        msg = str(exc).lower()
+        if any(kw in msg for kw in _QUOTA_KEYWORDS):
+            return ErrorAction.STOP
+        return ErrorAction.RETRY
+
+    overloaded_cls = getattr(anthropic, "OverloadedError", None)
+    if overloaded_cls is not None and isinstance(exc, overloaded_cls):
+        return ErrorAction.RETRY
+
+    if isinstance(exc, anthropic.InternalServerError):
+        return ErrorAction.RETRY
+
+    if isinstance(exc, (anthropic.APITimeoutError, anthropic.APIConnectionError)):
+        return ErrorAction.RETRY
+
+    skip_types: list[type] = [anthropic.BadRequestError, anthropic.NotFoundError]
+    too_large_cls = getattr(anthropic, "RequestTooLargeError", None)
+    if too_large_cls is not None:
+        skip_types.append(too_large_cls)
+    if isinstance(exc, tuple(skip_types)):
+        return ErrorAction.SKIP
+
+    return ErrorAction.SKIP
 
 
 @dataclass
