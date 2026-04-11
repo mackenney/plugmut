@@ -1075,3 +1075,183 @@ class TestCallLlmAndValidateAsync:
 
         assert len(result.mutations) == 1
         assert result.mutations[0]["mutated_code"] == "def f(): return 2"
+
+
+class TestComputeBackoff:
+    def test_attempt_zero(self):
+        from mutmut_llm.pipeline import _compute_backoff
+        d = _compute_backoff(0, 1.0)
+        assert 1.0 <= d <= 1.5
+
+    def test_attempt_one(self):
+        from mutmut_llm.pipeline import _compute_backoff
+        d = _compute_backoff(1, 1.0)
+        assert 2.0 <= d <= 2.5
+
+    def test_attempt_two(self):
+        from mutmut_llm.pipeline import _compute_backoff
+        d = _compute_backoff(2, 1.0)
+        assert 4.0 <= d <= 4.5
+
+    def test_capped_at_thirty(self):
+        from mutmut_llm.pipeline import _compute_backoff
+        # 1.0 * 2^10 = 1024 >> 30, capped at 30
+        d = _compute_backoff(10, 1.0)
+        assert 30.0 <= d <= 30.5
+
+
+class TestCallLlmAsync:
+    def _make_target(self):
+        from mutmut_llm.scope import ScopeTarget
+        return ScopeTarget(
+            file_path="f.py",
+            function_name="f",
+            source="def f(): return 1",
+            context="",
+        )
+
+    def _make_semaphore(self, n=5):
+        from mutmut_llm.pipeline import TrackedSemaphore
+        return TrackedSemaphore(n)
+
+    async def test_successful_call_returns_result(self):
+        import asyncio
+        from mutmut_llm.pipeline import _call_llm_async
+        from mutmut_llm.config import LLMConfig
+        from tests.conftest import make_async_mock_client, make_mock_response
+
+        mutations = [{"mutated_code": "def f(): return 2", "description": ""}]
+        client = make_async_mock_client([make_mock_response(mutations)])
+        config = LLMConfig(api_key="test-key", max_retries=2)
+        cancel_event = asyncio.Event()
+        sem = self._make_semaphore()
+        target = self._make_target()
+
+        result = await _call_llm_async(client, config, target, 3, sem, cancel_event)
+        assert len(result.mutations) == 1
+
+    async def test_cancel_event_prevents_call(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from mutmut_llm.pipeline import _call_llm_async
+        from mutmut_llm.config import LLMConfig
+
+        client = AsyncMock()
+        config = LLMConfig(api_key="test-key")
+        cancel_event = asyncio.Event()
+        cancel_event.set()  # Already cancelled
+        sem = self._make_semaphore()
+        target = self._make_target()
+
+        result = await _call_llm_async(client, config, target, 3, sem, cancel_event)
+        assert result.mutations == []
+        client.messages.create.assert_not_called()
+
+    async def test_skip_on_permanent_error(self):
+        import asyncio
+        import anthropic
+        from unittest.mock import AsyncMock, MagicMock
+        from mutmut_llm.pipeline import _call_llm_async
+        from mutmut_llm.config import LLMConfig
+
+        response = MagicMock()
+        response.status_code = 400
+        response.headers = {}
+        exc = anthropic.BadRequestError(message="bad request", response=response, body=None)
+
+        client = AsyncMock()
+        client.messages.create = AsyncMock(side_effect=exc)
+        config = LLMConfig(api_key="test-key", max_retries=2)
+        cancel_event = asyncio.Event()
+        sem = self._make_semaphore()
+        target = self._make_target()
+
+        result = await _call_llm_async(client, config, target, 3, sem, cancel_event)
+        assert result.mutations == []
+        # Should only call once (no retries for SKIP)
+        assert client.messages.create.call_count == 1
+
+    async def test_stop_on_fatal_error(self):
+        import asyncio
+        import anthropic
+        from unittest.mock import AsyncMock, MagicMock
+        from mutmut_llm.pipeline import _call_llm_async
+        from mutmut_llm.config import LLMConfig
+
+        response = MagicMock()
+        response.status_code = 401
+        response.headers = {}
+        exc = anthropic.AuthenticationError(message="invalid key", response=response, body=None)
+
+        client = AsyncMock()
+        client.messages.create = AsyncMock(side_effect=exc)
+        config = LLMConfig(api_key="test-key", max_retries=2)
+        cancel_event = asyncio.Event()
+        sem = self._make_semaphore()
+        target = self._make_target()
+
+        with pytest.raises(anthropic.AuthenticationError):
+            await _call_llm_async(client, config, target, 3, sem, cancel_event)
+        assert cancel_event.is_set()
+
+    async def test_retry_on_transient_error(self):
+        import asyncio
+        import anthropic
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from mutmut_llm.pipeline import _call_llm_async
+        from mutmut_llm.config import LLMConfig
+        from tests.conftest import make_mock_response
+
+        response = MagicMock()
+        response.status_code = 500
+        response.headers = {}
+        exc = anthropic.InternalServerError(message="server error", response=response, body=None)
+
+        success_response = make_mock_response([{"mutated_code": "def f(): return 2", "description": ""}])
+        client = AsyncMock()
+        client.messages.create = AsyncMock(side_effect=[exc, success_response])
+
+        config = LLMConfig(api_key="test-key", max_retries=2, base_backoff_seconds=0.001)
+        cancel_event = asyncio.Event()
+        sem = self._make_semaphore()
+        target = self._make_target()
+
+        sleep_calls = []
+        async def mock_sleep(delay):
+            sleep_calls.append(delay)
+
+        with patch("asyncio.sleep", mock_sleep):
+            result = await _call_llm_async(client, config, target, 3, sem, cancel_event)
+
+        assert len(result.mutations) == 1
+        assert len(sleep_calls) == 1  # One sleep between attempts
+        assert client.messages.create.call_count == 2
+
+    async def test_max_retries_exhausted_returns_empty(self):
+        import asyncio
+        import anthropic
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from mutmut_llm.pipeline import _call_llm_async
+        from mutmut_llm.config import LLMConfig
+
+        response = MagicMock()
+        response.status_code = 500
+        response.headers = {}
+        exc = anthropic.InternalServerError(message="server error", response=response, body=None)
+
+        client = AsyncMock()
+        client.messages.create = AsyncMock(side_effect=exc)
+
+        config = LLMConfig(api_key="test-key", max_retries=2, base_backoff_seconds=0.001)
+        cancel_event = asyncio.Event()
+        sem = self._make_semaphore()
+        target = self._make_target()
+
+        async def mock_sleep(delay):
+            pass
+
+        with patch("asyncio.sleep", mock_sleep):
+            result = await _call_llm_async(client, config, target, 3, sem, cancel_event)
+
+        assert result.mutations == []
+        assert client.messages.create.call_count == 3  # 1 initial + 2 retries

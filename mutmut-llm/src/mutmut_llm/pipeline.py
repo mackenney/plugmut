@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import random
 import signal
 import warnings
 from contextlib import contextmanager
@@ -413,3 +414,75 @@ async def _call_llm_and_validate_async(
         cache_creation_tokens=cache_creation_tokens,
         cache_read_tokens=cache_read_tokens,
     )
+
+
+def _compute_backoff(attempt: int, base: float, cap: float = 30.0) -> float:
+    """Compute backoff delay: base * 2^attempt + jitter, capped."""
+    delay = min(base * (2 ** attempt), cap)
+    jitter = random.uniform(0, 0.5)
+    return delay + jitter
+
+
+async def _call_llm_async(
+    client,  # anthropic.AsyncAnthropic
+    config: LLMConfig,
+    target: ScopeTarget,
+    max_mutations: int,
+    semaphore: TrackedSemaphore,
+    cancel_event: asyncio.Event,
+) -> GenerationResult:
+    """Per-target async wrapper with semaphore, retry, and cancellation."""
+    backoff_delay: float | None = None
+
+    for attempt in range(config.max_retries + 1):
+        if cancel_event.is_set():
+            return GenerationResult(mutations=[])
+
+        if backoff_delay is not None:
+            await asyncio.sleep(backoff_delay)
+            backoff_delay = None
+
+        if cancel_event.is_set():
+            return GenerationResult(mutations=[])
+
+        async with semaphore:
+            if cancel_event.is_set():
+                return GenerationResult(mutations=[])
+
+            try:
+                return await _call_llm_and_validate_async(client, config, target, max_mutations)
+
+            except asyncio.TimeoutError:
+                if attempt < config.max_retries:
+                    backoff_delay = _compute_backoff(attempt, config.base_backoff_seconds)
+                    warnings.warn(
+                        f"Timeout for {target.function_name}, retry {attempt + 1}/{config.max_retries} in {backoff_delay:.1f}s",
+                        stacklevel=2,
+                    )
+                else:
+                    warnings.warn(f"All retries exhausted for {target.function_name}: timeout", stacklevel=2)
+                    return GenerationResult(mutations=[])
+
+            except Exception as exc:
+                action = classify_error(exc)
+
+                if action == ErrorAction.STOP:
+                    cancel_event.set()
+                    raise
+
+                if action == ErrorAction.SKIP:
+                    warnings.warn(f"Skipping {target.function_name}: {exc}", stacklevel=2)
+                    return GenerationResult(mutations=[])
+
+                # RETRY
+                if attempt < config.max_retries:
+                    backoff_delay = _compute_backoff(attempt, config.base_backoff_seconds)
+                    warnings.warn(
+                        f"Retry {attempt + 1}/{config.max_retries} for {target.function_name} in {backoff_delay:.1f}s: {exc}",
+                        stacklevel=2,
+                    )
+                else:
+                    warnings.warn(f"All retries exhausted for {target.function_name}: {exc}", stacklevel=2)
+                    return GenerationResult(mutations=[])
+
+    return GenerationResult(mutations=[])
