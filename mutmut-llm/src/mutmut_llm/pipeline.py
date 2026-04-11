@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import signal
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone
@@ -28,6 +31,20 @@ from mutmut_llm.prompts import (
 )
 from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
+
+
+@contextmanager
+def _sigint_handler(cancel_event: "asyncio.Event"):
+    """Context manager that installs a SIGINT handler setting cancel_event."""
+
+    def handler(signum, frame):
+        cancel_event.set()
+
+    old_handler = signal.signal(signal.SIGINT, handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
 
 
 @dataclass
