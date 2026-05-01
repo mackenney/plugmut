@@ -6,6 +6,7 @@ import libcst as cst
 
 
 def operator_ternary(node: cst.IfExp) -> Iterable[cst.CSTNode]:
+    """Mutate ternary expressions: ``x if cond else y`` -> ``x``, ``y``, or swap branches."""
     # Yielding node.body and node.orelse (both BaseExpression) to replace a
     # cst.IfExp (also BaseExpression) is safe: deep_replace handles the
     # substitution correctly in any expression context -- assignments, returns,

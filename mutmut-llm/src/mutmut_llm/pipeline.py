@@ -28,6 +28,7 @@ from mutmut_llm.cache import (
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.pricing import calculate_cost
 from mutmut_llm.prompts import (
+    build_system_prompt,
     build_system_with_context,
     build_user_prompt,
     parse_llm_response,
@@ -277,9 +278,10 @@ async def _call_llm_and_validate_async(
     config: LLMConfig,
     target: ScopeTarget,
     max_mutations: int,
+    system_prompt: str | None = None,
 ) -> GenerationResult:
     """Async version of _call_llm_and_validate."""
-    system_blocks = build_system_with_context(context=target.context, ttl=config.cache_ttl)
+    system_blocks = build_system_with_context(context=target.context, ttl=config.cache_ttl, system_prompt=system_prompt)
     user_prompt = build_user_prompt(function_source=target.source, max_mutations=max_mutations)
 
     try:
@@ -352,6 +354,7 @@ async def _call_llm_async(
     max_mutations: int,
     semaphore: TrackedSemaphore,
     cancel_event: asyncio.Event,
+    system_prompt: str | None = None,
 ) -> GenerationResult:
     """Per-target async wrapper with semaphore, retry, and cancellation."""
     backoff_delay: float | None = None
@@ -372,7 +375,7 @@ async def _call_llm_async(
                 return GenerationResult(mutations=[])
 
             try:
-                return await _call_llm_and_validate_async(client, config, target, max_mutations)
+                return await _call_llm_and_validate_async(client, config, target, max_mutations, system_prompt=system_prompt)
 
             except asyncio.TimeoutError:
                 if attempt < config.max_retries:
@@ -422,7 +425,8 @@ async def _generate_mutations_async(
 
     effective_base = base_dir or Path(".")
     clean_stale_temps(effective_base / CACHE_DIR)
-
+    system_prompt = build_system_prompt()
+    
     client = anthropic.AsyncAnthropic(api_key=config.api_key)
 
     cache_kwargs: dict = {"base_dir": base_dir} if base_dir else {}
@@ -460,7 +464,7 @@ async def _generate_mutations_async(
 
     tasks: list[tuple[ScopeTarget, str, asyncio.Task]] = []
     for target, src_hash, max_mut in work_items:
-        coro = _call_llm_async(client, config, target, max_mut, semaphore, cancel_event)
+        coro = _call_llm_async(client, config, target, max_mut, semaphore, cancel_event, system_prompt)
         tasks.append((target, src_hash, asyncio.create_task(coro)))
 
     api_calls = 0
