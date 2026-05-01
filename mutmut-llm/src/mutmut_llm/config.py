@@ -6,6 +6,7 @@ Supported pyproject.toml keys (all optional)::
 
     [tool.mutmut.llm]
     model = "claude-sonnet-4-6"
+    min_mutations_per_function = 2
     max_mutations_per_function = 5
     max_tokens = 4096
     temperature = 0.6
@@ -38,6 +39,7 @@ _VALID_CACHE_TTLS = {"5m", "1h"}
 class LLMConfig:
     api_key: str = field(default="", repr=False)
     model: str = "claude-sonnet-4-6"
+    min_mutations_per_function: int = 2
     max_mutations_per_function: int = 5
     max_tokens: int = 4096
     temperature: float = 0.6
@@ -71,6 +73,11 @@ class LLMConfig:
         if self.request_timeout_seconds < 10:
             raise ValueError(
                 f"request_timeout_seconds must be >= 10, got {self.request_timeout_seconds}"
+            )
+        if self.min_mutations_per_function > self.max_mutations_per_function:
+            raise ValueError(
+                f"min_mutations_per_function ({self.min_mutations_per_function}) must be ≤ "
+                f"max_mutations_per_function ({self.max_mutations_per_function})"
             )
 
     @property
@@ -117,6 +124,10 @@ def load_config(
         section = read_toml_section(toml_path)
         if "model" in section:
             config.model = str(section["model"])
+        if "min_mutations_per_function" in section:
+            config.min_mutations_per_function = int(
+                section["min_mutations_per_function"]
+            )
         if "max_mutations_per_function" in section:
             config.max_mutations_per_function = int(
                 section["max_mutations_per_function"]

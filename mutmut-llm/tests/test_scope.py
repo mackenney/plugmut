@@ -9,8 +9,10 @@ from mutmut_llm.scope import (
     ScopeResult,
     ScopeTarget,
     _allocate_budget,
+    _branch_count,
     _discover_python_files,
     _extract_functions,
+    compute_mutation_budget,
     resolve_scope_deep,
 )
 
@@ -147,6 +149,124 @@ class TestDiscoverPythonFiles:
         assert len(result) == 2
 
 
+SIMPLE_FUNC = "def f(x):\n    return x + 1\n"
+
+MEDIUM_FUNC = """\
+def process(data):
+    result = []
+    for item in data:
+        if item > 0:
+            result.append(item * 2)
+        elif item == 0:
+            result.append(0)
+        else:
+            result.append(-item)
+    return result
+"""
+
+COMPLEX_FUNC = """\
+def transform(records, config):
+    output = []
+    seen = set()
+    for record in records:
+        if record.id in seen:
+            continue
+        seen.add(record.id)
+        if config.validate:
+            try:
+                record.validate()
+            except ValidationError:
+                if config.strict:
+                    raise
+                continue
+        if record.type == "A":
+            output.append(handle_a(record))
+        elif record.type == "B":
+            output.append(handle_b(record))
+        else:
+            output.append(handle_default(record))
+        if config.limit and len(output) >= config.limit:
+            break
+    for hook in config.post_hooks:
+        output = hook(output)
+    if config.sort:
+        output.sort(key=lambda r: r.priority)
+    return output
+"""
+
+
+class TestBranchCount:
+    def test_no_branches(self):
+        assert _branch_count("x = 1\ny = 2\n") == 0
+
+    def test_single_if(self):
+        assert _branch_count("if x:\n    pass\n") == 1
+
+    def test_if_elif_else(self):
+        # AST: `elif` is a nested ast.If in orelse; `else` is orelse list, not a node.
+        # So if/elif/else = 2 ast.If nodes, not 3.
+        assert (
+            _branch_count("if x:\n    pass\nelif y:\n    pass\nelse:\n    pass\n") == 2
+        )
+
+    def test_keywords_in_strings_not_counted(self):
+        # Regression: regex-based counting incorrectly counted 'if' inside strings.
+        assert _branch_count('def f():\n    msg = "if you need help"\n    return msg\n') == 0
+
+    def test_for_and_while(self):
+        assert _branch_count("for x in y:\n    while z:\n        pass\n") == 2
+
+    def test_try_except_with(self):
+        assert (
+            _branch_count("try:\n    with open(f):\n        pass\nexcept:\n    pass\n")
+            == 3
+        )
+
+    def test_complex_function(self):
+        count = _branch_count(COMPLEX_FUNC)
+        assert count >= 10
+
+
+class TestComputeMutationBudget:
+    def test_empty_source_returns_min(self):
+        assert compute_mutation_budget("") == 2
+
+    def test_one_liner_returns_min(self):
+        assert compute_mutation_budget(SIMPLE_FUNC) == 2
+
+    def test_medium_function(self):
+        budget = compute_mutation_budget(MEDIUM_FUNC)
+        assert 3 <= budget <= 5
+
+    def test_complex_function_gets_high_budget(self):
+        budget = compute_mutation_budget(COMPLEX_FUNC)
+        assert budget >= 7
+
+    def test_min_budget_respected(self):
+        assert compute_mutation_budget("", min_budget=4) == 4
+
+    def test_max_budget_respected(self):
+        assert compute_mutation_budget(COMPLEX_FUNC, max_budget=5) == 5
+
+    def test_comments_excluded_from_line_count(self):
+        source = "def f():\n    # comment 1\n    # comment 2\n    return 1\n"
+        budget_with_comments = compute_mutation_budget(source)
+        source_no_comments = "def f():\n    return 1\n"
+        budget_without = compute_mutation_budget(source_no_comments)
+        assert budget_with_comments == budget_without
+
+    def test_blank_lines_excluded(self):
+        source = "def f():\n\n\n    return 1\n\n"
+        assert compute_mutation_budget(source) == 2
+
+    def test_branches_increase_budget(self):
+        no_branches = "def f():\n    a = 1\n    b = 2\n    c = 3\n    d = 4\n    e = 5\n    f = 6\n    return a\n"
+        with_branches = "def f():\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    return e\n"
+        budget_plain = compute_mutation_budget(no_branches)
+        budget_branchy = compute_mutation_budget(with_branches)
+        assert budget_branchy >= budget_plain
+
+
 class TestAllocateBudget:
     def test_empty_targets(self):
         assert _allocate_budget([], 10, 5) == {}
@@ -155,50 +275,78 @@ class TestAllocateBudget:
         targets = [ScopeTarget(file_path="f.py", function_name="f", source="")]
         assert _allocate_budget(targets, 0, 5) == {}
 
-    def test_uniform_allocation(self):
+    def test_simple_functions_get_min_budget(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=""),
-            ScopeTarget(file_path="f.py", function_name="b", source=""),
+            ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="f.py", function_name="b", source=SIMPLE_FUNC),
         ]
-        alloc = _allocate_budget(targets, 10, 5)
-        assert alloc["f.py::a"] == 5
-        assert alloc["f.py::b"] == 5
+        alloc = _allocate_budget(targets, 20, 10)
+        assert alloc["f.py::a"] == 2
+        assert alloc["f.py::b"] == 2
+
+    def test_complex_function_gets_more_than_simple(self):
+        targets = [
+            ScopeTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
+        ]
+        alloc = _allocate_budget(targets, 50, 10)
+        assert alloc["f.py::complex"] > alloc["f.py::simple"]
 
     def test_capped_at_max_per_function(self):
-        targets = [ScopeTarget(file_path="f.py", function_name="a", source="")]
+        targets = [
+            ScopeTarget(file_path="f.py", function_name="a", source=COMPLEX_FUNC)
+        ]
         alloc = _allocate_budget(targets, 100, 3)
         assert alloc["f.py::a"] == 3
 
     def test_budget_less_than_targets(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=""),
-            ScopeTarget(file_path="f.py", function_name="b", source=""),
-            ScopeTarget(file_path="f.py", function_name="c", source=""),
+            ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="f.py", function_name="b", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="f.py", function_name="c", source=SIMPLE_FUNC),
         ]
         alloc = _allocate_budget(targets, 1, 5)
         assert sum(alloc.values()) <= 1
 
     def test_total_never_exceeds_budget(self):
-        """3 targets, budget=2 — must not allocate more than 2 total."""
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=""),
-            ScopeTarget(file_path="f.py", function_name="b", source=""),
-            ScopeTarget(file_path="f.py", function_name="c", source=""),
+            ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="f.py", function_name="b", source=MEDIUM_FUNC),
+            ScopeTarget(file_path="f.py", function_name="c", source=COMPLEX_FUNC),
         ]
-        alloc = _allocate_budget(targets, 2, 5)
-        assert sum(alloc.values()) <= 2
-        assert all(v >= 1 for v in alloc.values())
+        alloc = _allocate_budget(targets, 5, 10)
+        assert sum(alloc.values()) <= 5
 
     def test_file_qualified_keys_no_collision(self):
-        """Same function_name in different files must get separate allocations."""
         targets = [
-            ScopeTarget(file_path="a.py", function_name="helper", source=""),
-            ScopeTarget(file_path="b.py", function_name="helper", source=""),
+            ScopeTarget(file_path="a.py", function_name="helper", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="b.py", function_name="helper", source=SIMPLE_FUNC),
         ]
         alloc = _allocate_budget(targets, 10, 5)
         assert len(alloc) == 2
         assert "a.py::helper" in alloc
         assert "b.py::helper" in alloc
+
+    def test_min_per_function_parameter(self):
+        targets = [ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC)]
+        alloc = _allocate_budget(targets, 100, 10, min_per_function=5)
+        assert alloc["f.py::a"] >= 5
+
+    def test_scaling_preserves_relative_order(self):
+        targets = [
+            ScopeTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
+            ScopeTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
+        ]
+        alloc = _allocate_budget(targets, 5, 10)
+        assert alloc["f.py::complex"] >= alloc["f.py::simple"]
+
+    def test_large_budget_no_scaling(self):
+        targets = [
+            ScopeTarget(file_path="f.py", function_name="a", source=MEDIUM_FUNC),
+        ]
+        raw = compute_mutation_budget(MEDIUM_FUNC, min_budget=2, max_budget=10)
+        alloc = _allocate_budget(targets, 100, 10)
+        assert alloc["f.py::a"] == raw
 
 
 class TestResolveScopeDeep:
