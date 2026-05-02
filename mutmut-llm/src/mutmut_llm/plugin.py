@@ -117,6 +117,10 @@ def mutmut_configure(config: object) -> None:
 @hookimpl
 def mutmut_register_operators() -> OPERATORS_TYPE:
     if _llm_config and _llm_config.enabled:
+        try:
+            operator_llm.__mutmut_source__ = "mutmut-llm"  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            pass
         return [(cst.FunctionDef, operator_llm)]
     return []
 
