@@ -131,7 +131,9 @@ class TestExtractFunctions:
         targets = _extract_functions(sample_file)
         method = next(t for t in targets if t.function_name == "MyClass.method")
         assert "class MyClass:" in method.context
-        assert "def method(self): ..." not in method.context  # H4: target stub excluded, full source provided separately
+        assert (
+            "def method(self): ..." not in method.context
+        )  # H4: target stub excluded, full source provided separately
         assert "def other_method(self, x): ..." in method.context
         assert "attr = 42" in method.context
 
@@ -251,7 +253,9 @@ class TestExtractImportedNames:
         module = cst.parse_module(code)
         stmt = module.body[0]
         assert isinstance(stmt, cst.SimpleStatementLine)
-        return stmt.body[0]
+        item = stmt.body[0]
+        assert isinstance(item, (cst.Import, cst.ImportFrom))
+        return item
 
     def test_simple_import(self):
         node = self._import_node("import os\n")
@@ -289,7 +293,9 @@ class TestExtractAssignTargets:
         module = cst.parse_module(code)
         stmt = module.body[0]
         assert isinstance(stmt, cst.SimpleStatementLine)
-        return stmt.body[0]
+        item = stmt.body[0]
+        assert isinstance(item, (cst.Assign, cst.AnnAssign))
+        return item
 
     def test_simple_assign(self):
         node = self._assign_node("X = 42\n")
@@ -543,7 +549,10 @@ class TestBranchCount:
 
     def test_keywords_in_strings_not_counted(self):
         # Regression: regex-based counting incorrectly counted 'if' inside strings.
-        assert _branch_count('def f():\n    msg = "if you need help"\n    return msg\n') == 0
+        assert (
+            _branch_count('def f():\n    msg = "if you need help"\n    return msg\n')
+            == 0
+        )
 
     def test_for_and_while(self):
         assert _branch_count("for x in y:\n    while z:\n        pass\n") == 2
@@ -789,7 +798,9 @@ class TestContextIntegration:
         assert "import os" in size_target.context
         assert "from pathlib import Path" not in size_target.context
 
-        limit_target = next(t for t in targets if t.function_name == "FileHandler.limit")
+        limit_target = next(
+            t for t in targets if t.function_name == "FileHandler.limit"
+        )
         assert "MAX_SIZE = 1024" in limit_target.context
         assert "import os" not in limit_target.context
 
@@ -810,7 +821,9 @@ class TestContextIntegration:
         targets = _extract_functions(str(p))
 
         add_target = next(t for t in targets if t.function_name == "Calculator.add")
-        assert "def add(self, a: int, b: int) -> int: ..." not in add_target.context  # H4: target stub excluded
+        assert (
+            "def add(self, a: int, b: int) -> int: ..." not in add_target.context
+        )  # H4: target stub excluded
         assert "def subtract(self, a: int, b: int) -> int: ..." in add_target.context
         assert "def multiply(self, a: int, b: int) -> int: ..." in add_target.context
         # Bodies should not leak

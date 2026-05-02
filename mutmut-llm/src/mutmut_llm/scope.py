@@ -13,7 +13,6 @@ from pathlib import Path
 import libcst as cst
 
 
-
 @dataclass
 class ScopeTarget:
     file_path: str
@@ -87,7 +86,12 @@ def _extract_functions(file_path: str) -> list[ScopeTarget]:
                 if isinstance(class_stmt, cst.FunctionDef):
                     func_source = module.code_for_node(class_stmt)
                     module_context = _build_module_context(module, func_source)
-                    class_context = _build_class_context(module, stmt, module_context, target_function_name=class_stmt.name.value)
+                    class_context = _build_class_context(
+                        module,
+                        stmt,
+                        module_context,
+                        target_function_name=class_stmt.name.value,
+                    )
                     qualified_name = f"{stmt.name.value}.{class_stmt.name.value}"
                     targets.append(
                         ScopeTarget(
@@ -121,6 +125,7 @@ def _referenced_names(source: str) -> set[str]:
     tree.visit(collector)
     return collector.names
 
+
 def _build_module_context(module: cst.Module, function_source: str) -> str:
     """Extract imports and module-level constants relevant to the target function."""
     func_names = _referenced_names(function_source)
@@ -131,7 +136,9 @@ def _build_module_context(module: cst.Module, function_source: str) -> str:
             for item in stmt.body:
                 if isinstance(item, (cst.Import, cst.ImportFrom)):
                     # Wildcard imports are always included: can't determine usage statically.
-                    if isinstance(item, cst.ImportFrom) and isinstance(item.names, cst.ImportStar):
+                    if isinstance(item, cst.ImportFrom) and isinstance(
+                        item.names, cst.ImportStar
+                    ):
                         lines.append(module.code_for_node(stmt).strip())
                     else:
                         imported_names = _extract_imported_names(item)
@@ -182,6 +189,7 @@ def _rightmost_name(node: cst.Attribute | cst.Name) -> str:
 def _leftmost_name(node: cst.Attribute | cst.Name) -> str:
     if isinstance(node, cst.Name):
         return node.value
+    assert isinstance(node.value, (cst.Attribute, cst.Name))
     return _leftmost_name(node.value)
 
 
@@ -199,7 +207,10 @@ def _extract_assign_targets(node: cst.Assign | cst.AnnAssign) -> set[str]:
 
 
 def _build_class_context(
-    module: cst.Module, class_def: cst.ClassDef, module_context: str, target_function_name: str = ""
+    module: cst.Module,
+    class_def: cst.ClassDef,
+    module_context: str,
+    target_function_name: str = "",
 ) -> str:
     """Build context with class header, attributes, and method signatures.
 
@@ -209,7 +220,9 @@ def _build_class_context(
 
     header = f"class {class_def.name.value}"
     if class_def.bases:
-        bases = ", ".join(module.code_for_node(b.value).strip() for b in class_def.bases)
+        bases = ", ".join(
+            module.code_for_node(b.value).strip() for b in class_def.bases
+        )
         header += f"({bases})"
     header += ":"
     parts.append(header)
@@ -256,7 +269,19 @@ def _branch_count(source: str) -> int:
         return 0
     count = 0
     for node in ast.walk(tree):
-        if isinstance(node, (ast.If, ast.For, ast.While, ast.Try, ast.ExceptHandler, ast.With, ast.AsyncFor, ast.AsyncWith)):
+        if isinstance(
+            node,
+            (
+                ast.If,
+                ast.For,
+                ast.While,
+                ast.Try,
+                ast.ExceptHandler,
+                ast.With,
+                ast.AsyncFor,
+                ast.AsyncWith,
+            ),
+        ):
             count += 1
     return count
 
