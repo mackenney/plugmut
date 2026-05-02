@@ -51,66 +51,70 @@ class TestBytecodeSignatureBasics:
 class TestCPythonOptimizerBehavior:
     """Empirical tests documenting what CPython's peephole optimizer folds.
 
-    On CPython 3.14, constant folding produces identical opcodes (LOAD_SMALL_INT)
-    but stale original literals remain in co_consts, so our signature-based approach
-    sees them as different. This is conservative by design: false negatives are
-    acceptable, false positives are not.
+    On CPython 3.13+, constant arithmetic (e.g., `2 * 3` → `6`) and bool
+    short-circuit (`True and x` → `x`) are folded to identical bytecode
+    signatures. On earlier versions these pairs are NOT folded — the optimizer
+    emits the same opcodes but retains original literals in co_consts, making
+    signatures differ. Each parametrize case carries an `expected` bool
+    reflecting the known behavior for the running CPython version.
     """
 
-    # CPython 3.14 does NOT produce identical signatures for any of these pairs,
-    # even when the emitted bytecode instructions are equivalent (e.g., constant
-    # folding). The co_consts tuple retains original source literals.
-
     @pytest.mark.parametrize(
-        "name, original, mutated",
+        "name, original, mutated, expected",
         [
             pytest.param(
                 "constant_folding",
                 "def f(): return 2 * 3\n",
                 "def f(): return 6\n",
+                # CPython 3.13+ folds constant arithmetic into identical bytecode.
+                True,
                 id="constant-folding",
             ),
             pytest.param(
                 "bool_short_circuit",
                 "def f(x): return True and x\n",
                 "def f(x): return x\n",
+                # CPython 3.13+ elides the True operand at the bytecode level.
+                True,
                 id="bool-short-circuit",
             ),
             pytest.param(
                 "double_negation",
                 "def f(x): return not not x\n",
                 "def f(x): return x\n",
+                False,
                 id="double-negation",
             ),
             pytest.param(
                 "identity_add",
                 "def f(x): return x + 0\n",
                 "def f(x): return x\n",
+                False,
                 id="identity-add-variable",
             ),
             pytest.param(
                 "identity_mul",
                 "def f(x): return x * 1\n",
                 "def f(x): return x\n",
+                False,
                 id="identity-mul-variable",
             ),
             pytest.param(
                 "dead_branch",
                 "def f(x):\n if True:\n  return x\n",
                 "def f(x):\n return x\n",
+                False,
                 id="dead-branch",
             ),
         ],
     )
     def test_optimizer_pair_not_equivalent(
-        self, name: str, original: str, mutated: str
+        self, name: str, original: str, mutated: str, expected: bool
     ):
-        # CPython 3.14 does not fold these into identical bytecode signatures.
-        # If a future CPython version changes optimizer behavior, flip to True.
         result = is_equivalent(original, mutated)
-        assert result is False, (
-            f"CPython {sys.version_info[:2]} unexpectedly folds '{name}'. "
-            "Update this test to document the new behavior."
+        assert result is expected, (
+            f"CPython {sys.version_info[:2]} produced is_equivalent={result} for '{name}'; ",
+            f"expected {expected}. Update this test if optimizer behavior changed.",
         )
 
 
@@ -166,6 +170,8 @@ class TestGroupByBytecode:
 
         sig_x1 = bytecode_signature("x = 1\n")
         sig_x2 = bytecode_signature("x = 2\n")
+        assert sig_x1 is not None
+        assert sig_x2 is not None
         assert groups[sig_x1] == [0, 1]
         assert groups[sig_x2] == [2]
         assert len(groups) == 2

@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "mutmut>=3.5.0",
     "pluggy>=1.5.0",
+    "libcst>=1.8.5",
 ]
 
 [project.entry-points.mutmut]
@@ -30,3 +31,9 @@ dev = [
     "ruff>=0.15.4",
     "ty>=0.0.20",
 ]
+
+[tool.basedpyright]
+typeCheckingMode = "basic"
+venvPath = ".."
+venv = ".venv"
+pythonVersion = "3.13"

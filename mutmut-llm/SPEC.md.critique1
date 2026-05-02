@@ -1,0 +1,160 @@
+# Adversarial Critique — mutmut-llm SPEC.md.draft
+
+## Vague / Unfalsifiable Statements
+
+**1. "mutmut-llm DOES NOT verify that generated mutations are semantically non-equivalent"**
+This is a non-goal statement but the spec should clarify: is textual deduplication (same
+`mutated_code` string) guaranteed? The operator section says "deduplicating by `mutated_code`
+(string equality)" — that IS a guarantee. The non-goal text is sloppy; it conflates semantic
+equivalence (which is undecidable) with textual deduplication (which is implemented). Fix:
+separate "no semantic equivalence checking" from "textual deduplication IS guaranteed."
+
+**2. "Nested functions are NOT included."**
+Source: `scope.py` iterates `module.body` and `stmt.body.body` (class body). Functions nested
+inside functions are not traversed. But: what about functions nested inside `if` blocks at
+module level? `_extract_functions` only walks top-level `module.body` and the body of
+top-level classes. A function inside an `if __name__ == "__main__":` block is NOT found. The
+spec says "top-level function definitions and methods of top-level classes" — that's accurate,
+but does NOT mention the `if`-block exclusion explicitly. Should be called out as a known
+limitation if intentional, or an open question if unclear.
+
+**3. "Priorities: env var > pyproject.toml > defaults"**
+The code shows that for fields OTHER than `api_key`, pyproject.toml is read BEFORE env vars
+are checked. But actually there is no overlap — only `api_key` comes from env. The priority
+statement is accurate but potentially misleading: env vars only set `api_key`; everything
+else comes from pyproject or defaults. This should be stated more precisely.
+
+**4. "The last system block... MUST carry the `cache_control` annotation."**
+This is an implementation detail about the Anthropic API message format, not a behavioral
+contract. What is the *observable* behavior? The observable contract is: "the system prompt
+MUST be structured to enable prompt caching at the LLM provider level, using the TTL
+specified by `cache_ttl`." Drop the Anthropic-specific message structure language.
+
+**5. Concurrency "collected in task creation order"**
+The code collects results with `for target, src_hash, task in tasks: ... result = await task`
+— results are awaited in order of task creation, which is file_path order. But: tasks are
+running concurrently, so their completion order is NOT task creation order. What is actually
+guaranteed is that cache entries are WRITTEN in the order results are awaited (i.e., file_path
+order), not in completion order. The spec conflates "awaited in order" with "completed in
+order." Fix: state "results are awaited in ascending file_path order; cache writes occur in
+that order" and remove the implied completion ordering.
+
+**6. "SIGINT... MUST set a `cancel_event` without immediately terminating the process."**
+Correct but incomplete. What happens to the SIGINT signal between the context manager
+restoring the original handler and the caller handling it? If the original handler was
+`SIG_DFL` (default — terminate), then after the context manager exits, the process behavior
+reverts to default. Is it possible that a SIGINT received AFTER the context manager exits
+but BEFORE `run_generation` returns could cause an unhandled termination? The spec doesn't
+address SIGINT received outside the `_sigint_handler` scope.
+
+## Missing Invariants
+
+**7. What happens when `validate_mutation` is called on a mutation whose `mutated_code`
+is identical to `original_code`?** The prompt instructs the LLM not to return original code,
+but there's no validation check for this. It would pass all three validation stages (syntax
+OK, no new imports, no pragma changes if original has none). This is a semantic gap — the
+spec should note that identity mutations are not filtered by validation, only by the LLM's
+compliance with the prompt.
+
+**8. The `parse_llm_response` contract is not in the spec at all.** This is a core part of
+the generation pipeline — it converts raw LLM text to `[{"mutated_code": ..., "description":
+...}]`. The spec should document its parsing behavior: tries raw JSON, then markdown code
+blocks, then embedded JSON array. Only dicts with `mutated_code` key are kept. A total
+parse failure produces `[]`, not an error.
+
+**9. `dry_run` behavior for `paths` parameter.** The spec says dry run "discovers scope and
+reports but makes no API calls." It doesn't specify that `dry_run=True` works even without an
+API key. The code permits this (no key check in dry-run path). This should be an explicit
+invariant: `dry_run` MUST NOT require a valid API key.
+
+**10. Budget allocation formula is underspecified.** The spec says "uniformly allocated,
+capped per function by `max_mutations_per_function`." But the actual formula is
+`per_function = min(max_per_function, max(1, total_budget // len(targets)))`. The
+`max(1, ...)` means at least 1 mutation per function is always allocated if targets exist and
+budget > 0. This is an important behavioral guarantee (no function gets 0 budget in normal
+cases) and should be explicit.
+
+**11. `_allocate_budget` terminates early.** When `remaining` drops to 0, remaining targets
+get no budget entry (not in `alloc` dict). When a target has no budget entry, the code falls
+back to `config.max_mutations_per_function`. This is a behavioral inconsistency: functions
+beyond the budget still have a budget entry key missing from `alloc`, so the fallback is
+`config.max_mutations_per_function`, not 0. The spec says "remaining functions in scope are
+silently skipped" — but this only applies to functions that hit the outer `len(work_items) >=
+total_budget` check, not the budget allocation. The allocation is separate from the API call
+budget cap. The spec conflates these two.
+
+## Implementation Details That Snuck In
+
+**12. "Writes MUST use an advisory file lock (per-target `.lock` sidecar file)"**
+This is pure implementation detail. The behavioral contract should be: "concurrent writes to
+the same cache entry MUST be safe; a reader MUST never observe a partial write." How this is
+achieved is implementation detail.
+
+**13. "temp file + rename"** and "uses fsync before os.replace" — pure implementation. The
+behavioral guarantee is atomicity; the mechanism is not part of the spec.
+
+**14. "4-segment key" and filename structure** — the cache key scheme section describes the
+filename structure in detail, but the spec should focus on the observable contract: "a cache
+entry for a specific `(file_path, function_name, source_hash, model)` tuple is guaranteed to
+be uniquely addressable." Model name sanitization rules leak implementation. The caller should
+only need to know "model names containing special characters are supported without collision."
+
+**15. `mutmut_configure` resets `_reset_cache_index()` and `_llm_mutant_names.clear()`** —
+these are internal module-level state implementation details, not behavioral contracts. The
+spec should say: "the operator's cache index MUST be rebuilt at the start of each mutmut run"
+not describe the mechanism.
+
+## Contradictions / Unclear Contracts
+
+**16. "LLM mutations are always the LAST `n` mutants"**
+This assumption is stated as a guarantee but it's actually a fragile convention, not a
+contract enforced by any spec. The spec notes it under "Open Questions" (item 5) but also
+states it as a MUST. These can't both be true. Pick one: either document it as a fragile
+implementation convention (not a MUST), or acknowledge the open question and remove the MUST.
+
+**17. `cache_ttl` valid values**
+The spec says valid values are `{"5m", "1h"}` — hardcoded in `_VALID_CACHE_TTLS`. This is
+an implementation artifact. What is the behavioral contract? "Controls LLM prompt caching
+TTL; currently only 5-minute and 1-hour durations are supported." The restriction is
+behavioral (not implementation), so it belongs in the spec, but should be framed as a
+supported-values constraint, not as referencing a set.
+
+**18. "Empty `mutated_code` string passes syntax check"**
+The validation section says "An empty string passes syntax check (valid Python)." True. But
+the operator (`_parse_mutation`) would then produce a module with no `FunctionDef` matching
+the expected name, and the operator would skip it with a warning. So an empty mutation would
+pass validation at generation time but be silently discarded at operator time. The spec should
+flag this as a known behavioral gap.
+
+## Missing Sections / Things That Should Be Documented
+
+**19. Prompt structure.** The system prompt constrains what types of mutations the LLM should
+and should not generate (no arithmetic swaps, no boolean flips, etc.). This IS a behavioral
+contract: the LLM operator MUST NOT be expected to produce these categories of mutations
+(they are explicitly excluded from the prompt). This has implications for consumers
+combining LLM mutations with rule-based operators — the overlap is intentionally minimal.
+
+**20. Reporting module.** The `format_run_summary` and `format_run_table` functions are part
+of the package's public output. No contract is specified for what these produce.
+
+**21. The `e2e_project` fixture.** The spec says nothing about the `e2e_project/` directory.
+Not spec-relevant, but the e2e tests imply certain behaviors about how `mutmut run` interacts
+with `mutmut generate` that aren't captured in the spec.
+
+## Summary of Required Fixes for Next Draft
+
+Priority fixes:
+1. Remove implementation details from Caching (atomic write mechanism, lock mechanism, key
+   structure details → replace with behavioral guarantees).
+2. Clarify that budget allocation (per-function) is separate from the API call budget cap
+   (total calls).
+3. Add `parse_llm_response` contract.
+4. Add `dry_run` + no API key invariant.
+5. Fix the LLM mutant ordering: state it as a convention-dependent assumption, not a MUST.
+6. Remove Anthropic-specific system prompt block structure from the spec; express as
+   behavioral contract about caching behavior.
+7. Resolve the `RunResult.total_llm_cost_usd` semantics issue — it's either a bug (and should
+   be in bugs) or an intentional design (and should be in Known Limitations with a clear label
+   that this is cumulative, not per-run).
+8. Add the "minimum 1 budget per function" invariant from `_allocate_budget`.
+9. Note that identity mutations pass validation (no LLM output deduplication against original).

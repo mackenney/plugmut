@@ -1,0 +1,573 @@
+# mutmut-extras Specification
+
+> The key words MUST, MUST NOT, SHOULD, SHOULD NOT, MAY are used per RFC 2119.
+
+## Purpose
+
+mutmut-extras is a plugin package that registers 19 additional mutation operators into a
+mutmut installation. It extends the builtin operator set by targeting AST patterns that
+the builtins do not cover or deliberately skip. Each operator is independently testable
+and independently composable with other plugin packages.
+
+## Non-Goals
+
+- Does NOT replace or modify core mutmut behavior; only appends operators.
+- Does NOT control which mutations are run, filtered, or reported; that is core's
+  responsibility.
+- Does NOT guarantee that generated mutations are semantically valid; semantic errors
+  (e.g., `break` outside a loop when not in a loop context) are left for the test runner
+  to detect.
+- Does NOT deduplicate mutations. When multiple operators independently produce
+  structurally identical mutants for the same node, both appear in the pipeline.
+- Does NOT cover every possible mutation pattern; coverage decisions are explicit per
+  operator.
+- Does NOT guarantee a stable count of registered operators; the exact number is an
+  implementation detail.
+
+## Plugin Contract
+
+mutmut-extras registers via the `mutmut` entry-point group. It implements
+`mutmut_register_operators` and returns a flat list of `(NodeType, callable)` tuples.
+
+### Operator callable signature
+
+```
+(node: NodeType) -> Iterable[MutatedNode]
+```
+
+where `NodeType` is the CST node class declared in the tuple. The callable receives one
+CST node and yields zero or more mutated nodes.
+
+**Return type compatibility:** An operator MAY yield nodes of a different concrete type
+than its declared `NodeType`, provided the yielded node is type-compatible with the
+parent tree's substitution site. In practice this means: an operator declared for a
+`BaseExpression` subtype MAY yield any other `BaseExpression` subtype (e.g., `ternary`
+and `remove_boundary_offset` exploit this). An operator MUST NOT yield a node that would
+be invalid at the parent's expected type position.
+
+### Operator invariants
+
+Each operator MUST satisfy all of the following:
+
+1. **Purity:** Same input node → same output nodes, always. No shared state, no I/O.
+
+2. **Non-mutation of input:** The input node MUST NOT be modified. All output nodes
+   MUST be new nodes created via `.with_changes()` or `.with_deep_changes()`.
+
+3. **Target-state guard (idempotency guard):** If the input node is already in the
+   operator's intended mutation target state, the operator MUST yield nothing. Each
+   operator's "target state" is defined in its catalogue entry.
+
+4. **Syntactic validity:** Every yielded mutation MUST produce a CST that libcst can
+   serialize to syntactically valid Python source. Formally: for every yielded node
+   `m`, `cst.parse_module(original_module.deep_replace(original_node, m).code)` MUST
+   succeed without raising `cst.ParserSyntaxError`.
+
+   Note: `ast.parse()` and `compile()` are not part of this guarantee. Some mutations
+   (e.g., `break`/`continue` outside a loop from `exception_control_flow`) are valid
+   at the libcst/ast.parse level but raise `SyntaxError` at `compile()` time. Such
+   mutations will be generated and subsequently killed by the test runner; they are not
+   filtered at generation time.
+
+### Multiple operators, same NodeType
+
+When multiple operators are registered for the same `NodeType`, ALL of them fire on
+every matching node. Mutations are appended to the pipeline in operator registration
+order. Callers MUST NOT rely on the specific registration order of operators — it is an
+implementation detail of this package.
+
+### Excluded contexts (core constraint)
+
+Operators are only invoked for nodes that the mutmut core visitor deems eligible. The
+following contexts are NEVER reached by any operator, regardless of node type:
+- Inside `cst.Annotation` subtrees (type annotations)
+- Inside `cst.Decorator` subtrees (decorator arguments)
+- `cst.FunctionDef` or `cst.ClassDef` nodes with any unsafe decorator (decorator not in
+  the safe set: `staticmethod`, `classmethod`, `abstractmethod`, `override`, `wraps`)
+  — the node AND all of its children are skipped
+- `cst.Param` nodes with compound/non-literal defaults (not `Name`, `BaseNumber`,
+  `BaseString`) — the node AND all of its children are skipped
+
+This is a core constraint. Operators MUST NOT be designed assuming they receive nodes
+from excluded contexts.
+
+## Operator Catalogue
+
+### return_none
+
+**Trigger:** `cst.Return` node where `.value` is present and is not already `cst.Name("None")`.
+
+**Output contract:** Exactly one mutation: the `Return` with `.value` replaced by
+`cst.Name("None")`.
+
+**Target state (guard):** value is `cst.Name("None")` or value is absent (bare `return`).
+
+**Non-goals:** Does not mutate bare `return`. Does not produce `return False` or `return 0`.
+
+---
+
+### exception_handler
+
+**Trigger:** `cst.ExceptHandler` whose body is NOT already a single `pass` statement.
+
+**Output contract:** Exactly one mutation: body replaced with a single `pass` block.
+Exception type and name binding are preserved.
+
+**Target state (guard):** Body is already `pass`.
+
+**Non-goals:** Does not mutate exception type. Does not generate multiple body variants.
+
+---
+
+### ternary
+
+**Trigger:** `cst.IfExp` node (any conditional expression `x if cond else y`).
+
+**Output contract:** Exactly three mutations in this order:
+1. `node.body` — true-branch expression replaces the whole ternary
+2. `node.orelse` — false-branch expression replaces the whole ternary
+3. `node.with_changes(body=node.orelse, orelse=node.body)` — operands swapped
+
+All three yielded nodes are `cst.BaseExpression` subtypes and MUST be valid in any
+expression position (assignments, returns, binary operations, f-strings, comprehensions,
+function arguments, dict values). This is safe because `cst.IfExp` IS a `BaseExpression`.
+
+**Target state (guard):** None — the operator always yields exactly 3 mutations for any
+`IfExp` (there is no "already mutated" state).
+
+**Non-goals:** Does not mutate the condition expression.
+
+---
+
+### assert_true
+
+**Trigger:** `cst.Assert` node whose test is not already `cst.Name("True")`.
+
+**Output contract:** Exactly one mutation: `.test` replaced with `cst.Name("True")`.
+Assertion message (if present) is preserved.
+
+**Target state (guard):** test is `cst.Name("True")`.
+
+**Non-goals:** Does not produce `assert False`. Does not remove the assertion.
+
+---
+
+### slice_removal
+
+**Trigger:** `cst.Slice` node with at least one non-`None` component
+(`lower`, `upper`, or `step`).
+
+**Output contract:** One mutation per non-`None` component — each sets that component to
+`None`, leaving others unchanged. When `step` is removed, `second_colon` is reset to
+`MaybeSentinel.DEFAULT`. Maximum three mutations for a fully-specified slice.
+
+**Target state (guard):** All components are already `None` (empty slice `[:]`).
+
+**Non-goals:** Does not combine multiple component removals in one mutation. Does not
+remove the subscript operation itself.
+
+---
+
+### void_call_removal
+
+**Trigger:** `cst.SimpleStatementLine` whose body is exactly one `cst.Expr` whose value
+is a `cst.Call`.
+
+**Output contract:** Exactly one mutation: body replaced with `cst.Pass()`.
+
+**Target state (guard):** Line body is already `pass`.
+
+**Non-goals:** Does not fire when the call's return value is used (assignment, comparison,
+return, augmented assignment). Does not fire on multi-statement lines. Does not
+distinguish `super().method()` calls from other calls (see Bugs section).
+
+---
+
+### yield_mutation
+
+**Trigger:** `cst.Yield` node that is not a `yield from` expression.
+
+**Output contract:**
+- `yield expr` where `expr ≠ None` → exactly one mutation: `yield None`
+- bare `yield` (no value) → exactly one mutation: `yield 0`
+- `yield None` → nothing (target state)
+- `yield from ...` → nothing (excluded)
+
+**Target state (guard):** `yield None` for valued yields; `yield from` excluded entirely.
+
+**Non-goals:** Does not mutate `yield from`. Does not produce multiple mutations from a
+single node.
+
+---
+
+### comprehension_filter
+
+**Trigger:** `cst.CompFor` node with at least one `if` clause.
+
+**Output contract:** Exactly one mutation: the `CompFor` with ALL `if` clauses removed
+(`ifs=()`). Applies independently to each `CompFor` node in a comprehension. A
+comprehension with N `CompFor` nodes that each have `if` clauses produces N independent
+mutations (one per `CompFor`).
+
+**Target state (guard):** `ifs` is already empty.
+
+**Non-goals:** Does not remove individual `if` clauses one at a time when multiple are
+present. Does not remove the comprehension or its `for` clause.
+
+---
+
+### super_call_deletion
+
+**Trigger:** `cst.SimpleStatementLine` whose sole body statement is a `cst.Expr` whose
+value is a `cst.Call` with `func` of the form `Attribute(value=Call(func=Name("super")))`.
+
+**Output contract:** Exactly one mutation: body replaced with `cst.Pass()`.
+
+Matches: `super().__init__(x)`, `super().save()`, `super(MyClass, self).method()`.
+Does not fire when the result is used in an expression (assignment, return, etc.).
+
+**Target state (guard):** Line body is already `pass`.
+
+**Non-goals:** Does not fire on bare `super()` without attribute access. Does not fire
+when the return value is used. Does not distinguish assigned-and-discarded from
+statement-level calls.
+
+---
+
+### fstring_mutation
+
+**Trigger:** `cst.FormattedStringExpression` whose `.expression` is not already
+`cst.SimpleString("'XX'")`.
+
+**Output contract:** Exactly one mutation: `.expression` replaced with
+`cst.SimpleString("'XX'")`. Conversion flags (e.g., `!r`, `!s`) and format specs
+(e.g., `:.2f`) are preserved unchanged by `.with_changes(expression=...)`.
+
+Does fire on expression slots that already contain string literals other than `'XX'`
+(e.g., `f"{'hello'}"` → `f"{'XX'}"`).
+
+**Target state (guard):** `.expression` is already `cst.SimpleString("'XX'")`.
+
+**Non-goals:** Does not mutate f-string literal parts. Does not remove f-string
+interpolations. The sentinel value `'XX'` is not configurable.
+
+---
+
+### function_deletion
+
+**Trigger:** `cst.FunctionDef` node whose body is not already a single `pass` block.
+
+**Output contract:** Exactly one mutation: body replaced with a single `pass` statement.
+Function name, parameters, return annotation, and decorators are preserved.
+
+Applies to sync functions, async functions (`async def`), top-level functions, methods,
+and nested functions.
+
+**Target state (guard):** Body is already `pass`.
+
+**Core interaction caveat:** The core visitor skips `FunctionDef` nodes with any unsafe
+decorator entirely. Therefore `function_deletion` does not fire on functions with custom
+decorators unless ALL decorators are in the safe set (`staticmethod`, `classmethod`,
+`abstractmethod`, `override`, `wraps`).
+
+**Non-goals:** Does not fire on functions already containing only `pass`. Does not delete
+class definitions. Does not strip decorators.
+
+---
+
+### default_param_mutation
+
+**Trigger:** `cst.Param` with a default value in one of these cases:
+1. Default is `cst.Name("None")` — mutate to integer `0`
+2. Default is a non-builtin name (not `True` or `False`) — mutate to `None`
+
+**Output contract:**
+- Case 1 (`None` default) → one mutation: `param=0`
+- Case 2 (non-builtin name default) → one mutation: `param=None`
+- Yields nothing for builtin literals (`True`, `False`, `Integer`, `Float`,
+  `SimpleString`, `FormattedString`, `ConcatenatedString`) — builtins cover these.
+- Yields nothing for `Param` without a default.
+
+**Core interaction caveat (dead code path for compound defaults):** The operator
+contains a third branch that handles compound/collection defaults (lists, tuples, calls,
+etc.) → `None`. However, the core visitor skips `Param` nodes with compound defaults
+entirely (to prevent mutations like `abs(-1)` → `abs(None)` crashing at definition
+time). This third branch is NEVER reached through the normal `create_mutations` pipeline.
+It exists in operator code but produces no mutations at runtime. See Bugs section.
+
+**Non-goals:** Does not duplicate mutations covered by builtin operators.
+
+---
+
+### reverse_iteration
+
+**Trigger:** `cst.For` node where the iterable is not already a `reversed(...)` call.
+
+**Output contract:** Exactly one mutation: the `for` node with the iterable wrapped in
+`reversed(iterable)`.
+
+**Important:** In libcst, `async for` is represented as `cst.For` with
+`asynchronous=Asynchronous()`. This operator fires on `async for` loops as well,
+producing `async for x in reversed(items)`. When `items` is an async iterable,
+`reversed()` will raise `TypeError` at runtime — this mutation will be killed, but it is
+semantically incorrect. This is a known limitation (see Bugs section).
+
+**Target state (guard):** Iterable is already a `reversed(...)` call.
+
+**Non-goals:** Does not mutate loop body or target variable. Does not add an import for
+`reversed` (it is a builtin).
+
+---
+
+### startswith_endswith_swap
+
+**Trigger:** `cst.Call` node where the callee is `cst.Attribute` with `.attr.value` of
+exactly `"startswith"` or `"endswith"`.
+
+**Output contract:**
+- `.startswith(args)` → one mutation: `.endswith(args)`, all arguments preserved
+- `.endswith(args)` → one mutation: `.startswith(args)`, all arguments preserved
+
+**Target state (guard):** None — swapping twice returns to original, but this operator
+only fires on the original node.
+
+**Non-goals:** Does not fire on free functions named `startswith`/`endswith`. Does not
+mutate arguments. Does not fire on unbound method calls like `str.startswith(x, ...)`.
+
+---
+
+### strip_to_partial
+
+**Trigger:** `cst.Call` node where callee is `cst.Attribute` with `.attr.value == "strip"`
+AND the call has zero arguments.
+
+**Output contract:** Exactly two mutations:
+1. `.lstrip()`
+2. `.rstrip()`
+
+**Target state (guard):** Callee name is not `"strip"` or call has arguments.
+
+**Non-goals:** Does not fire on `strip(chars)` with arguments. Does not fire on `lstrip()`
+or `rstrip()`. Does not fire on free functions named `strip`.
+
+---
+
+### operand_swap
+
+**Trigger:** `cst.BinaryOperation` with a non-commutative operator: `-`, `/`, `//`, `%`, `**`.
+
+**Output contract:** Exactly one mutation: left and right operands swapped. Operator is
+preserved.
+
+Does not fire on commutative operators: `+`, `*`, `&`, `|`, `^`, and others not in the
+explicit list.
+
+**Non-goals:** Does not mutate the operator itself. Does not swap augmented assignments
+(`-=`, `/=`, etc.). Does not chain-swap nested binary expressions.
+
+---
+
+### remove_boundary_offset
+
+**Trigger:** `cst.BinaryOperation` matching one of these exact patterns:
+- `expr + 1` (right operand is `cst.Integer("1")`, operator is `cst.Add`)
+- `expr - 1` (right operand is `cst.Integer("1")`, operator is `cst.Subtract`)
+- `1 + expr` (left operand is `cst.Integer("1")`, operator is `cst.Add`)
+
+Does NOT fire on `1 - expr` (asymmetric exclusion — see Open Questions).
+
+**Output contract:** Exactly one mutation: the non-`1` side of the expression (the `expr`
+node). The yielded node replaces the entire `BinaryOperation` at its tree position. The
+yielded node type is whatever `node.left` or `node.right` is — it MAY be any
+`BaseExpression` subtype, not necessarily a `BinaryOperation`.
+
+**Target state (guard):** One operand is not integer literal `1`, or operator is not
+`Add`/`Subtract`.
+
+**Non-goals:** Does not target offsets other than `1`. Does not target `* 1` or `/ 1`.
+
+---
+
+### exception_type_broadening
+
+**Trigger:** `cst.ExceptHandler` with a non-`None` exception type that is not already
+`cst.Name("Exception")` or `cst.Name("BaseException")`.
+
+**Output contract:**
+- `except SomeError:` (simple name) → one mutation: `except Exception:`
+- `except (A, B, ...):` with ≥2 elements → multiple mutations:
+  1. Entire tuple replaced with `cst.Name("Exception")`
+  2. For each individual element NOT already `Exception`/`BaseException`, one mutation
+     replacing only that element with `Exception` (others unchanged)
+  Maximum mutations: 1 + count(non-broad elements in tuple)
+- `except (A,):` (single-element tuple) → nothing
+- bare `except:` → nothing
+
+**Target state (guard):** Type is already `Exception`, `BaseException`, bare `except`, or
+single-element tuple.
+
+**Non-goals:** Does not broaden to `BaseException`. Does not mutate handler body.
+
+---
+
+### exception_control_flow
+
+**Trigger:** `cst.ExceptHandler` whose body is EXACTLY a single `pass` statement.
+
+**Output contract:** Exactly three mutations in this order:
+1. Body replaced with `break`
+2. Body replaced with `continue`
+3. Body replaced with `return`
+
+**Target state (guard):** Body is not exactly a single `pass` statement.
+
+**Non-goals:** Does not fire when handler body contains any statement other than `pass`.
+Does not produce `raise` as a mutation.
+
+**Semantic validity note:** `break` and `continue` are only semantically valid inside
+loops. When generated for handlers outside a loop, these mutations are libcst-parseable
+and `ast.parse`-valid but raise `SyntaxError: 'break' outside loop` at Python `compile()`
+time. Such mutations are generated and killed by the test runner; they are NOT filtered
+at generation time. The operator does not inspect enclosing scope.
+
+---
+
+## Behavioral Invariants
+
+### I1: Syntax guarantee
+Every mutation yielded by every operator MUST produce a CST that, when applied to the
+original module via `deep_replace`, serializes to source that is parseable by both libcst
+and `ast.parse`. Mutations that fail at `compile()` time (e.g., `break` outside loop)
+are not precluded by this guarantee.
+
+### I2: Determinism
+For the same input node, an operator MUST always yield the same sequence of output nodes.
+
+### I3: Input immutability
+Operators MUST NOT modify the input node. All output MUST be produced via
+`.with_changes()` or `.with_deep_changes()` calls.
+
+### I4: Target-state guard
+Each operator MUST return an empty iterable when the node is already in the operator's
+defined target state. See each operator's "Target state (guard)" for the definition.
+
+### I5: Independent activation
+Operator activation depends solely on `isinstance(node, declared_type)`. The presence
+or absence of other operators does not change which nodes an operator fires on.
+
+### I6: No cross-operator filtering
+mutmut-extras does NOT implement `mutmut_filter_mutations`. Post-generation filtering is
+outside scope.
+
+### I7: Builtin non-duplication (default_param_mutation only)
+`default_param_mutation` MUST NOT yield mutations for parameter defaults already covered
+by mutmut's builtin operators: `True`, `False`, integer literals, float literals,
+`SimpleString`, `FormattedString`, and `ConcatenatedString` defaults.
+
+---
+
+## Known Limitations / Accepted Trade-offs
+
+- **Duplicate pass mutations for super() calls:** `void_call_removal` and
+  `super_call_deletion` both produce `pass` mutations for `super().method()` statements.
+  Two structurally identical `Mutation` objects enter the pipeline. deduplication is out
+  of scope for this package.
+
+- **exception_control_flow and compile-time errors:** `break`/`continue` mutations
+  outside loops compile-fail and are killed at test time, not filtered at generation.
+
+- **function_deletion and decorated functions:** Cannot fire on functions with unsafe
+  decorators due to core skip logic.
+
+- **isinstance operator blocked:** `isinstance` appears in core's `NEVER_MUTATE_FUNCTION_CALLS`
+  set, causing its entire argument subtree to be skipped. A type-reduction operator
+  for `isinstance(x, (A, B))` is deferred until core exposes a way to override this.
+
+---
+
+## Open Questions
+
+1. **comprehension_filter multi-clause:** Should removing `if` clauses one at a time
+   (when multiple exist) be supported? Current behavior removes all simultaneously.
+
+2. **`remove_boundary_offset` asymmetry:** `1 - expr` is intentionally excluded while
+   `1 + expr` is included. Is this the final contract, or a missed case?
+
+3. **`yield 0` as bare-yield sentinel:** Why `0` specifically? Should this be
+   configurable? Are `False`, `""`, or `[]` useful alternatives?
+
+4. **`exception_type_broadening` single-element tuple:** `except (ValueError,):` yields
+   nothing. Is this intentional design or an oversight?
+
+5. **`reverse_iteration` and async for:** The operator fires on `async for` loops
+   (same libcst node type). Wrapping an async iterable with `reversed()` produces a
+   semantically invalid mutation (TypeError at runtime). Should the operator guard
+   against `async for`?
+
+6. **`strip_to_partial` asymmetry:** `lstrip()` and `rstrip()` are not themselves
+   targets of this operator. Is `lstrip()` → `strip()` (reverse direction) desirable?
+
+7. **`operand_swap` and augmented assignments:** `a -= b` is a separate AST node
+   (`AugAssign`), not a `BinaryOperation`. Should operand swapping extend to augmented
+   assignments?
+
+8. **Operator count stability:** Is the set of 19 operators a stable API contract, or
+   may new operators be added in patch versions?
+
+9. **Cross-plugin ordering:** When mutmut-extras and another plugin both register
+   operators for the same `NodeType`, mutation ordering between them is unspecified.
+   Should the `mutmut_register_operators` hook define a priority/ordering mechanism?
+
+---
+
+## Bugs / Inconsistencies Observed
+
+### B1: `default_param_mutation` compound-default path is dead in normal pipeline
+**Severity:** Medium
+
+The operator's third branch (compound/collection defaults → `None`) is unreachable
+through `create_mutations` because the core visitor skips `Param` nodes with non-literal
+defaults before any operator is applied. Unit tests call the operator directly and pass,
+masking this dead path. Integration tests only test `None` and name defaults (both
+reachable). Users expecting `def f(x=list())` to be mutated will see no mutation.
+
+### B2: `void_call_removal` and `super_call_deletion` produce duplicate mutations
+**Severity:** Low
+
+Both operators match `super().__init__(x)` as a `SimpleStatementLine` containing a
+`Call`, and both yield structurally identical `pass` mutations. Two `Mutation` objects
+with identical `original_node` and equivalent `mutated_node` enter the pipeline.
+
+### B3: `exception_control_flow` docstring states false claim
+**Severity:** Low (documentation only)
+
+The docstring says "Invalid variants (break outside loop) are filtered by mutmut's
+syntax validation." This is false: these mutations are not filtered; they are generated,
+compile-fail at test time, and are killed by the runner. The docstring should say the
+mutations are "killed at test-run time, not filtered at generation time."
+
+### B4: `reverse_iteration` fires on `async for` loops
+**Severity:** Medium
+
+In libcst, `async for x in items` is a `cst.For` node with `asynchronous=Asynchronous()`.
+The operator has no guard for this case and wraps the iterable with `reversed()`, which
+is invalid for async iterables (raises `TypeError` at runtime). The mutation will be
+killed, but it is semantically incorrect and generates noise.
+
+---
+
+## Acceptance Criteria
+
+```bash
+# All unit + integration tests pass
+uv run --package mutmut-extras pytest mutmut-extras/tests/ -q
+
+# All operators produce only libcst-valid Python (not ast.parse/compile coverage)
+uv run --package mutmut-extras pytest mutmut-extras/tests/test_syntax_validation.py -v
+
+# Plugin generates strictly more mutations than builtins alone
+uv run --package mutmut-extras pytest mutmut-extras/tests/e2e/ -v -k "baseline"
+
+# No mutant produces a crash exit code (negative or unexpected)
+uv run --package mutmut-extras pytest mutmut-extras/tests/e2e/ -v -k "no_plugin_crashes"
+```

@@ -1,0 +1,425 @@
+# mutmut-llm Specification
+
+> The key words MUST, MUST NOT, SHOULD, SHOULD NOT, MAY are used per RFC 2119.
+
+## Purpose
+
+mutmut-llm is a plugin for mutmut that generates semantically sophisticated code mutations
+using a large language model. It operates in two distinct phases: a generation phase (run
+explicitly before mutation testing) that calls the LLM API and stores mutations in a local
+file cache, and an operator phase (run automatically during mutmut's mutation pass) that reads
+from that cache and yields pre-generated mutations to mutmut's standard pipeline. The
+separation ensures that LLM API costs are incurred only during generation, not during each test
+run, and that the mutation testing phase can run without network access.
+
+## Non-Goals
+
+- mutmut-llm does NOT run tests, judge mutation survival, or affect how mutmut executes tests.
+- mutmut-llm does NOT clean up stale cache entries when source files change. Entries for
+  renamed, deleted, or heavily refactored functions accumulate indefinitely.
+- mutmut-llm does NOT provide per-model or per-run cost isolation: cost figures reported after
+  a run represent cumulative totals across all cached entries, not just the current run.
+- mutmut-llm does NOT verify that generated mutations are semantically non-equivalent to each
+  other. It deduplicates by textual identity only (`mutated_code` string equality).
+- mutmut-llm does NOT support targeted mutation (specific file or function subset selection).
+  Only "deep mode" (all functions under given paths) is implemented.
+- mutmut-llm does NOT support PR-diff-aware mutation scoping.
+
+## Core Mental Model
+
+**Two-phase design.** Generation (`mutmut generate`) and mutation testing (`mutmut run`) are
+independent operations. The cache is the interface between them.
+
+**Source hash as identity.** A function is identified by the SHA-256 hash (16-hex-char prefix)
+of its stripped source text. Cache lookups are keyed by this hash, not by file path or
+function name alone. Two functions with identical bodies in different files share cache
+entries and receive the same mutations.
+
+**Per-model entries.** Each `(function_identity, model_name)` pair has its own cache entry.
+Running generation with model A does not invalidate model B's entry for the same function.
+During mutation testing, all cached mutations for a function across all models are merged and
+deduplicated by `mutated_code`.
+
+**Validation gate.** Every LLM-generated mutation passes a three-stage validation pipeline
+(syntax → imports → pragmas) before entering the cache. Mutations that fail validation are
+discarded at generation time; they never appear in the cache.
+
+**Plugin registration.** mutmut-llm registers itself as a mutmut plugin via the
+`project.entry-points.mutmut` entry point. It implements multiple mutmut hook specifications
+for the complete lifecycle: configure, operator registration, mutation identification,
+per-test tracking, and post-run reporting.
+
+## LLM Mutation Generation Contract
+
+### Inputs
+
+`run_generation` accepts:
+- `config`: an `LLMConfig` (see Configuration Contract)
+- `paths`: a list of file paths or directory paths to scan for Python functions
+- `budget`: an integer maximum number of API calls to make in this run
+- `dry_run`: a flag; when true, discovers scope and reports but makes no API calls
+
+### Outputs and postconditions
+
+- `run_generation` MUST return the count of API calls made.
+- For each function in scope, if no valid cache entry exists for the active model, the system
+  MUST attempt to generate mutations and write a cache entry on success.
+- Successfully generated mutations MUST pass the validation pipeline before caching.
+- Any mutation that fails validation MUST NOT be written to the cache.
+- Cached entries MUST contain at least the fields: `function_name`, `file_path`,
+  `source_hash`, `mutations`, `model`, `cost_usd`, `input_tokens`, `output_tokens`,
+  `generated_at`.
+- Functions already cached for the active model MUST be skipped (no API call made).
+- When `enabled = false`, `run_generation` MUST return 0 and make no API calls.
+- When `api_key` is empty and `dry_run` is false, `run_generation` MUST return 0 and report
+  the missing key.
+
+### Scope discovery
+
+- Source paths are expanded recursively: directories yield all `*.py` files, sorted.
+- Functions are extracted by traversing the top-level AST: top-level function definitions and
+  methods of top-level classes are included.
+- Nested functions (functions defined inside other functions) are NOT included.
+- Abstract or non-method class bodies are not targeted.
+
+### Budget
+
+- Generation processes at most `budget` functions per `run_generation` call.
+- Functions are processed in ascending `file_path` order (alphabetical).
+- Budget counts API calls, not functions; a function already cached does not consume budget.
+- When the budget is exhausted, remaining functions in scope are silently skipped for this run.
+
+### Mutation count per function
+
+- Each function receives at most `max_mutations_per_function` mutations from the LLM (this is
+  a request upper bound; the LLM MAY return fewer).
+- Total budget is allocated uniformly across in-scope functions, capped per function by
+  `max_mutations_per_function` and by remaining total budget.
+
+### Operator integration
+
+- `operator_llm` is a FunctionDef mutation operator that yields pre-generated mutations.
+- `operator_llm` MUST look up mutations by source hash of the function's CST source text.
+- `operator_llm` MUST merge mutations from all cached models for the same source hash,
+  deduplicating by `mutated_code` (string equality).
+- `operator_llm` MUST skip mutations whose `mutated_code` does not parse or does not contain
+  a FunctionDef with the expected function name. Skipped mutations emit a warning.
+- `operator_llm` MUST NOT make any API calls or perform I/O beyond reading the cache index.
+- The cache index MUST be built at most once per mutmut run (lazy, on first operator call).
+  It is reset between runs via the `mutmut_configure` hook.
+
+## Caching Contract
+
+### Cache location and format
+
+- Cache entries are stored as JSON files under `.mutmut-cache/llm/` relative to the project
+  root (or a configurable `base_dir`).
+- Cache files MUST be written atomically (temp file + rename) to prevent partial reads on
+  crash or concurrent access.
+- Writes MUST use an advisory file lock (per-target `.lock` sidecar file) to prevent
+  concurrent writers from corrupting entries.
+
+### Cache key scheme
+
+- A cache entry's filename is deterministic from `(file_path, function_name, source_hash,
+  model)`.
+- `file_path` path separators are normalized to underscores in the filename.
+- When `model` is non-empty, the key has 4 segments: `{path}__{name}__{hash}__{model}`.
+- When `model` is empty, the key has 3 segments: `{path}__{name}__{hash}` (legacy format).
+- Model names containing `_`, `__`, or `/` MUST be sanitized such that:
+  - `/` becomes `-slash-`
+  - `\` becomes `-bslash-`
+  - `_` becomes `-u-`
+  - This ensures the `__` delimiter between segments is unambiguous.
+
+### Cache hit/miss semantics
+
+- A cache hit requires an exact match on `source_hash` AND `model` (4-segment lookup).
+- A lookup with `model=None` MUST find any entry matching `(file_path, function_name,
+  source_hash)`, preferring the 3-segment (no-model) file if present, then falling back to a
+  glob scan. This is a backwards-compatibility path.
+- A lookup that finds a file but whose stored `source_hash` does not match the requested hash
+  MUST return None (cache miss). The stored entry MUST NOT be returned.
+- Corrupt or unparseable cache files MUST be silently skipped; they MUST NOT cause an error.
+
+### Multi-model coexistence
+
+- Entries for different models of the same function MUST coexist as separate files.
+- Writing an entry for model A MUST NOT delete or modify model B's entry.
+- The legacy (no-model) entry and model-specific entries MAY coexist.
+
+### Backwards compatibility
+
+- Entries written without a model field (3-segment filename) MUST be readable by
+  `list_cache_entries` and `read_cache_entry(model=None)`.
+- `read_cache_entry(model="some-model")` MUST NOT match old 3-segment files.
+- `CacheEntry.from_dict` MUST tolerate missing optional fields (`model`, `cost_usd`,
+  `input_tokens`, `output_tokens`, `cache_creation_tokens`, `cache_read_tokens`,
+  `generated_at`) by substituting zero/empty defaults.
+
+### Source hash computation
+
+- The source hash MUST be the first 16 hex characters of the SHA-256 hash of the stripped
+  (leading/trailing whitespace removed) UTF-8 source text of the function.
+- The hash MUST be deterministic: identical source text (after stripping) always yields the
+  same hash.
+
+## Validation Pipeline
+
+Validation is applied to each candidate mutation before it is accepted. The pipeline runs
+three stages in this order:
+
+1. **Syntax check**: parse the `mutated_code` as a complete Python module. If it does not
+   parse, the mutation is rejected.
+2. **Import guard**: compare the set of module names imported in `mutated_code` against those
+   in `original_code`. If `mutated_code` imports any module not present in `original_code`,
+   the mutation is rejected. Import names are compared by top-level module only (e.g., `os`
+   for both `import os` and `from os import path`).
+3. **Pragma guard**: for every line in `original_code` that contains `# pragma: no mutate`
+   (case-insensitive, whitespace-normalized), the corresponding line at the same index in
+   `mutated_code` MUST be identical. If any pragma-marked line differs or is absent from the
+   mutation, the mutation is rejected.
+
+Pipeline invariants:
+- Stages run in order; the first failure causes rejection without running subsequent stages.
+- A rejection MUST be accompanied by a warning or logged message indicating the reason.
+- A rejection MUST NOT cause the generation attempt to fail; remaining mutations continue.
+- A mutation that removes existing imports (has FEWER imports than original) MUST pass the
+  import guard.
+- A mutation that does not touch any pragma-marked line MUST pass the pragma guard.
+- An empty `mutated_code` string passes syntax check (valid Python) and import guard (no
+  imports), and passes pragma guard only if the original has no pragma lines.
+
+## Cost Tracking Contract
+
+### Per-generation tracking
+
+- For each API call, the system MUST record: `input_tokens`, `output_tokens`,
+  `cache_creation_tokens`, `cache_read_tokens`, and `cost_usd`.
+- Token counts are taken from the API response's usage fields. If a field is absent from the
+  response, its count defaults to zero.
+- `cache_creation_tokens` and `cache_read_tokens` are NOT subtracted from `input_tokens`;
+  all four values are stored independently.
+- `cost_usd` is calculated from a hardcoded pricing table. For unknown model names, the
+  calculation MUST fall back to the Sonnet pricing tier and MUST emit a warning.
+- Cache write price defaults to `input_price × 1.25`; cache read price defaults to
+  `input_price × 0.10` when not explicitly specified in the pricing table.
+- Per-call cost and token counts are stored in the cache entry at write time. They reflect
+  the cost of the generation call that produced this entry.
+
+### Run-level tracking
+
+- After a mutmut run completes, `RunResult.total_llm_cost_usd` MUST be set to the sum of
+  `cost_usd` across ALL entries currently in the cache (not just entries generated this run).
+- Similarly, `total_input_tokens` and `total_output_tokens` reflect cumulative cache totals.
+- Per-model cost breakdown is NOT provided; the total is across all models.
+- If the API call fails, the recorded cost and token counts for that call MUST be zero.
+
+### Cache hit rate reporting
+
+- After generation, if any `cache_read_tokens > 0` across the run, a cache hit rate MUST be
+  reported.
+- Cache hit rate = `sum(cache_read_tokens) / sum(input_tokens + cache_read_tokens +
+  cache_creation_tokens)` across all API calls in this generation run.
+- If no cache tokens were used, the cache hit rate line MUST NOT be printed.
+
+## Retry and Backoff Contract
+
+### Error classification
+
+Errors from the LLM API are classified into three actions:
+- **RETRY**: transient error; retry after backoff. Applies to: rate limit (non-quota),
+  server overload, internal server error, timeout, connection error.
+- **SKIP**: permanent error for this target; move on. Applies to: bad request, not found,
+  request too large, unrecognized exceptions.
+- **STOP**: fatal; cancel all remaining work. Applies to: authentication error, permission
+  denied, rate limit with quota/billing/credit/spending-limit message.
+
+### Retry behavior
+
+- The number of attempts per target is `max_retries + 1`.
+- After a retryable failure, the system MUST wait a backoff delay before the next attempt.
+- Backoff delay: `min(base_backoff_seconds × 2^attempt, 30.0) + uniform_jitter(0, 0.5)`.
+- On STOP error: the cancel event MUST be set and the exception MUST be re-raised, causing
+  the generation run to terminate after completing any in-flight tasks.
+- When all retries are exhausted for a target: the target produces an empty `GenerationResult`
+  (zero mutations, zero cost), and a warning MUST be emitted.
+- Timeout errors (`TimeoutError`) are classified as retryable.
+- When `cancel_event` is set before or during a call, the function MUST return an empty
+  `GenerationResult` without making any API call.
+
+## Concurrency Contract
+
+### Concurrency level
+
+- Concurrency is computed dynamically: `max(min_concurrency, min(n_targets // 3,
+  max_concurrency))`, where `n_targets` is the number of functions that need generation
+  (uncached targets only).
+- When `n_targets = 0`, returns `min_concurrency`.
+- The concurrency level MUST be within `[min_concurrency, max_concurrency]`.
+
+### Execution ordering and isolation
+
+- Targets are scheduled in ascending `file_path` order before execution begins.
+- All async tasks are created upfront before any result is awaited.
+- Results are collected in task creation order.
+- Concurrent tasks MUST NOT share mutable state; each target's generation and cache write
+  are independent.
+- A failure on one target MUST NOT prevent other targets from completing, unless the error
+  action is STOP.
+- `TrackedSemaphore.in_flight` reflects the number of tasks currently holding a semaphore
+  slot at any point in time.
+
+## Configuration Contract
+
+Configuration is loaded from two sources in the following priority order (highest wins):
+1. `ANTHROPIC_API_KEY` environment variable (API key only)
+2. `[tool.mutmut.llm]` section of `pyproject.toml` (located by walking up from cwd)
+3. Dataclass defaults
+
+### Config fields and guarantees
+
+| Field | Type | Default | Constraint |
+|---|---|---|---|
+| `model` | str | `"claude-sonnet-4-6"` | Any string; affects cache key and cost |
+| `max_mutations_per_function` | int | `5` | No range validation in current implementation (see Bugs) |
+| `max_tokens` | int | `4096` | Passed to API; no explicit minimum enforced |
+| `temperature` | float | `0.6` | Must be in `[0.0, 1.0]` |
+| `enabled` | bool | `True` | |
+| `cache_ttl` | str | `"5m"` | Must be one of: `"5m"`, `"1h"` |
+| `min_concurrency` | int | `5` | Must be ≥ 1 |
+| `max_concurrency` | int | `20` | Must be ≥ `min_concurrency` |
+| `max_retries` | int | `3` | Must be ≥ 0 |
+| `base_backoff_seconds` | float | `1.0` | Must be > 0 |
+| `request_timeout_seconds` | int | `120` | Must be ≥ 10 |
+
+- `LLMConfig.__post_init__` MUST raise `ValueError` if any constraint is violated.
+- `load_config` MUST raise `ValueError` if `cache_ttl` in pyproject.toml is invalid.
+- `is_configured` returns `True` if and only if `api_key` is non-empty.
+
+### Prompt caching behavior
+
+- `cache_ttl` controls the `cache_control.ttl` value passed to the LLM API for system prompt
+  caching. `"5m"` uses the API default (ephemeral, no explicit TTL field); `"1h"` adds
+  `ttl: "1h"` to the cache control block.
+- The last system block (either the context block or the base system prompt if no context)
+  MUST carry the `cache_control` annotation.
+- File-level context (imports, class headers) is passed as a separate system block so it is
+  cached across calls to functions in the same file.
+
+## Plugin Integration Contract
+
+mutmut-llm registers the following hooks:
+
+- **`mutmut_configure(config)`**: loads `LLMConfig`, initializes the current run, resets the
+  in-memory cache index and LLM mutant name tracking.
+- **`mutmut_register_operators()`**: returns `[(cst.FunctionDef, operator_llm)]` if enabled;
+  returns `[]` if disabled.
+- **`mutmut_mutations_created(filename, source_by_mutant_name)`**: identifies which newly
+  created mutants belong to the LLM operator by comparing mutation counts per function
+  against the cache. LLM mutations are always the LAST `n` mutants for each function, where
+  `n` is the count of cached LLM mutations for that function.
+- **`mutmut_post_test(mutant_name, exit_code, status, duration)`**: appends a `MutantResult`
+  to the current run, marking it `is_llm` if the mutant was previously identified as LLM-
+  generated.
+- **`mutmut_post_run(source_file_mutation_data)`**: writes the completed run to disk with
+  cumulative cost and token totals.
+- **`mutmut_register_commands(cli_group)`**: registers `generate` and `llm-status` CLI
+  subcommands on mutmut's CLI group.
+
+### LLM mutant identification
+
+- `mutmut_mutations_created` MUST be called after all operators have run for a file.
+- The identification method assumes that for each function, builtin operators produce mutants
+  first, and the LLM operator appends its mutants last. This relies on operator registration
+  order being stable.
+- If `llm_counts` is empty (no cache entries), identification is skipped.
+- `_extract_function_name` parses mutmut's mangled mutant names; it handles dotted module
+  prefixes, the `x_` function prefix, and the `ǁ` class-name separator.
+
+### Run storage
+
+- Each mutmut run MUST generate a unique `run_id` (12-character hex UUID prefix).
+- Runs are stored as JSON files under `.mutmut-cache/llm/runs/`.
+- `load_latest_run` returns the run with the lexicographically greatest `started_at` value.
+- Run files MUST be written atomically.
+
+## Cancellation Contract
+
+- SIGINT (Ctrl-C) during `run_generation` MUST set a `cancel_event` without immediately
+  terminating the process.
+- Once `cancel_event` is set, pending tasks MUST NOT make new API calls; they MUST return an
+  empty `GenerationResult`.
+- In-flight tasks are awaited to completion (either naturally or cancelled) before the
+  generation function returns.
+- Work already written to cache before cancellation MUST be preserved.
+- The original SIGINT handler MUST be restored when `run_generation` returns, including on
+  exception.
+- A `KeyboardInterrupt` (e.g., second Ctrl-C) while awaiting tasks MUST cancel all
+  outstanding tasks.
+
+## Known Limitations / Accepted Trade-offs
+
+1. **Cache never expires automatically.** Functions that are renamed, deleted, or changed
+   accumulate stale entries indefinitely. Manual `clear_cache()` removes all entries.
+2. **Cost totals are cumulative, not per-run.** `RunResult.total_llm_cost_usd` is the sum of
+   all cache entry costs, not just entries generated in the current run. Two runs with the
+   same functions and models will report the same cost total.
+3. **Source hash collisions are not detected.** The 16-char (64-bit) hash prefix is used
+   without collision detection. Two semantically different functions that collide will share
+   mutations.
+4. **Deep mode only.** All functions under given paths are included. Targeting a specific
+   function or running only on diff-changed functions is not supported.
+5. **Import comparison by module name.** Adding `import os` when `from os import path` was
+   already present does not count as a new import. This is a known limitation of the import
+   guard.
+6. **File lock is non-reentrant.** Acquiring a lock on the same path from the same thread
+   deadlocks (one lock per open-file-description).
+7. **Stale temp files.** The `clean_stale_temps` function removes `.tmp` files older than 300
+   seconds without acquiring the per-file lock, which may race with an active writer; the
+   atomic write retry loop handles this.
+
+## Open Questions
+
+1. **Should `max_mutations_per_function` have range validation (> 0)?** Currently no
+   lower-bound check is enforced. A value of 0 would produce no mutations silently.
+2. **Should the run-level cost fields reflect only the current run's generation cost?** The
+   current cumulative-total design means the cost field grows monotonically and is not scoped
+   to a single run, which is semantically misleading on `RunResult`.
+3. **Should `operator_llm` deduplicate across models or return per-model mutations
+   separately?** Current behavior merges all models' mutations for a source hash. This can
+   produce surprising results when running with different models sequentially.
+4. **What is the specified behavior when `source_hash` returns the same value for two
+   genuinely different functions (hash collision)?** The spec currently has no answer.
+5. **The `mutmut_mutations_created` ordering assumption (LLM last).** This assumption is not
+   enforced by any hook specification. If a future operator registers after `operator_llm`,
+   the identification will be incorrect.
+
+## Bugs / Inconsistencies Observed
+
+1. **`_llm_mutation_count_by_function` ignores `base_dir`** (plugin.py). The plugin's
+   `mutmut_mutations_created` hook calls `list_cache_entries()` without `base_dir`, always
+   reading from `cwd/.mutmut-cache/llm/`. If generation was run with a custom `base_dir`,
+   the cache entries will not be found, and no LLM mutations will be identified.
+
+2. **`cost_usd` on `RunResult` is semantically mislabeled.** The field documents itself as
+   `total_llm_cost_usd` and is on a per-run object, but its value is the sum of all cache
+   entries ever written (not filtered to this run's entries). A user inspecting
+   `RunResult.total_llm_cost_usd` after two separate generation runs will see the combined
+   cost of both runs, not just the latest run.
+
+3. **Import guard tracks module names, not fully qualified paths.** `from os import path`
+   and `import os` both contribute the key `"os"` to the import set. A mutation that removes
+   `from os import path` and adds `import os` passes the import guard, even though it
+   introduces a behavioral change (namespace access pattern changes).
+
+4. **Sync vs. async `_call_llm_and_validate` error handling divergence.** The sync version
+   catches all `Exception` and returns an empty result with a warning. The async version only
+   explicitly handles `TimeoutError` and re-raises other exceptions to `_call_llm_async` for
+   classification. The two paths are not equivalent under all error conditions, and both exist
+   in the codebase simultaneously (the sync version is documented as a "backward compat"
+   wrapper but is tested independently).
+
+5. **`generated_at` is stored as a raw ISO 8601 string with no format validation.** Old cache
+   entries may have different timestamp formats or be empty. `load_latest_run` sorts by
+   `started_at` string lexicographically, which fails if formats are mixed.

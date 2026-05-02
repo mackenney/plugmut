@@ -36,3 +36,9 @@ dev = [
 ]
 [tool.ty.environment]
 python = "../.venv"
+
+[tool.basedpyright]
+typeCheckingMode = "basic"
+venvPath = ".."
+venv = ".venv"
+pythonVersion = "3.13"

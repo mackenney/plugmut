@@ -1,0 +1,458 @@
+# Adversarial Critique: mutmut-llm Spec
+
+> This critique is against `mutmut-llm/SPEC.md.draft`.
+> The draft already incorporates an earlier self-critique (`SPEC.md.critique1`).
+> This round goes deeper, verifying claims against `pipeline.py`, `cache.py`,
+> `config.py`, `validation.py`, `_io.py`, `pricing.py`, and `storage.py`.
+
+---
+
+## Implementation Leakage Found
+
+**IL-1 (HIGH): Caching Contract exposes mechanism, not behavior**
+
+Spec says:
+- "Writes MUST use an advisory file lock (per-target `.lock` sidecar file)"
+- "Cache files MUST be written atomically (temp file + rename)"
+
+These are *how*. The behavioral contract is: "A reader MUST never observe a partial cache
+write. Concurrent writers to the same cache entry MUST NOT corrupt it." How atomicity and
+mutual exclusion are achieved is not the spec's business. Revise to drop the mechanism and
+state the behavioral guarantee.
+
+**IL-2 (MEDIUM): Cache key sanitization rules are implementation detail**
+
+Spec section "Cache key scheme" specifies exact character substitutions (`/` → `-slash-`,
+`\` → `-bslash-`, `_` → `-u-`). These are filename-encoding details. The behavioral
+contract is: "Model names containing any characters, including path separators and
+underscores, MUST be unambiguously round-trippable from the cache key." Callers do not
+need to know the encoding scheme.
+
+**IL-3 (MEDIUM): Prompt caching implementation leaks Anthropic message format**
+
+Spec says "the last system block... MUST carry the `cache_control` annotation." This
+describes the Anthropic Messages API structure. The behavioral contract is: "the system
+prompt MUST be structured to enable LLM-provider-level prompt caching using the TTL
+specified by `cache_ttl`." The cache_control block structure is an implementation detail.
+
+**IL-4 (LOW): `TrackedSemaphore.in_flight` mentioned as contract**
+
+Spec says "`TrackedSemaphore.in_flight` reflects the number of tasks currently holding a
+semaphore slot." This is an internal class with no external contract. Remove or move to
+implementation notes.
+
+**IL-5 (LOW): `_generate_mutations` (sync) documented as "backward compat wrapper"**
+
+The spec documents a sync path. This is a private function, not a public API. If it's
+undocumented as a public entry point, it should not appear in the spec at all. If it IS
+public, its error-handling divergence from the async path (see CONTRA-1) must be
+explicitly documented.
+
+---
+
+## Caching Contract Gaps
+
+**CC-1 (CRITICAL): Function name sanitization omitted from key uniqueness claim**
+
+Spec says: "Model names containing `_`, `__`, or `/` MUST be sanitized such that the `__`
+delimiter between segments is unambiguous."
+
+This claim is FALSE by omission. `_cache_key` sanitizes `file_path` (path separators →
+`_`) and `model` (detailed rules), but does NOT sanitize `function_name`. A function named
+`my__func` produces a key like:
+```
+path__my__func__hash__model
+```
+The segment `my__func` contains `__`, making the delimiter ambiguous. Two different
+functions can produce the same key if one has a double-underscore in its name and the other
+has a different segmentation.
+
+**Concrete collision example:**
+- `file_path="a"`, `function_name="b__c"`, `hash="h"`, `model="m"` →
+  key `a__b__c__h__m`
+- `file_path="a__b"`, `function_name="c"`, `hash="h"`, `model="m"` →
+  key `a__b__c__h__m`
+
+The uniqueness guarantee MUST be qualified or the function name must also be sanitized.
+
+**CC-2 (HIGH): `read_cache_entry(model=None)` returns indeterminate model entry**
+
+Spec says: "preferring the 3-segment (no-model) file if present, then falling back to a
+glob scan."
+
+The glob scan (`sorted(d.glob(f"{prefix}__*.json"))`) returns entries sorted by FILENAME.
+Filename sort order is alphabetical by model string (after sanitization). So if models
+`claude-haiku` and `claude-sonnet` both have entries, the returned entry is `claude-haiku`
+(alphabetically first). The spec presents this as a backwards-compatibility lookup but
+doesn't warn callers that the returned model is arbitrary when multiple model entries exist.
+This is undeterminate behavior that should be documented as such or explicitly prohibited.
+
+**CC-3 (MEDIUM): `clear_cache()` does not clear run history**
+
+Spec says: "Manual `clear_cache()` removes all entries."
+
+Implementation: `clear_cache` removes `*.json` files in `.mutmut-cache/llm/`. Run files
+live in `.mutmut-cache/llm/runs/`. The glob `*.json` does not match subdirectory files.
+Run history persists after `clear_cache()`. The spec should say "removes all CACHE ENTRIES
+(function mutation JSON files) but does not remove run history."
+
+**CC-4 (MEDIUM): Cache file deleted between list and read**
+
+Spec says "Corrupt or unparseable cache files MUST be silently skipped" but says nothing
+about files that are deleted between `list_cache_entries()` and a subsequent
+`read_cache_entry()`. The code silently returns None on FileNotFoundError (via the
+`not path.exists()` check), which is correct. But the spec should explicitly state: "If a
+cache file disappears between discovery and read, the entry MUST be treated as a miss."
+
+**CC-5 (MEDIUM): POSIX-only locking not disclosed**
+
+The lock implementation uses `fcntl.flock`, which is POSIX-only (Linux, macOS). On
+Windows, `fcntl` does not exist and any write would fail with an `ImportError`. The spec
+makes no mention of OS compatibility. Either document "this package requires a POSIX
+filesystem" or acknowledge it as a known limitation.
+
+**CC-6 (LOW): `list_cache_entries` includes any *.json in cache root**
+
+`list_cache_entries` reads ALL `*.json` files in the cache root directory. If any
+non-entry JSON files exist there (from other tools, debugging, etc.), they are silently
+attempted to deserialize and dropped on `KeyError`/`JSONDecodeError`. This is fragile and
+should either be documented ("the cache directory MUST NOT contain non-entry JSON files")
+or the code should filter by filename pattern.
+
+---
+
+## Validation Pipeline Gaps
+
+**VP-1 (HIGH): "valid syntax" means libcst-parseable, not Python-parseable**
+
+Spec says "parse the `mutated_code` as a complete Python module." Implementation uses
+`cst.parse_module(code)` (libcst), not `ast.parse()` or `compile()`. libcst and CPython's
+parser can disagree in edge cases (some f-string forms, some future-import combinations).
+The behavioral contract must specify: "parseable by libcst's module parser," not just
+"valid Python module."
+
+**VP-2 (HIGH): Pragma guard uses LINE POSITION, not content proximity**
+
+The spec says "the corresponding line at the same index in `mutated_code` MUST be
+identical." Implementation: `mutated_lines[idx] != original_line` where `idx` is the
+ORIGINAL line number.
+
+If a mutation INSERTS a line anywhere before a pragma-marked line, the pragma content
+shifts to index `idx+1` but the check is made at index `idx` (now containing the inserted
+line). The pragma check FAILS even though the pragma line itself is untouched. This is a
+strict and surprising behavior: inserting a blank line before a pragma-protected line
+causes the entire mutation to be rejected.
+
+The spec uses the ambiguous word "corresponding." It must be made explicit: "The line at
+the SAME ZERO-BASED INDEX position in `mutated_code`, not the same content."
+
+**VP-3 (MEDIUM): Import guard: nested imports are counted, not just top-level**
+
+Spec says "compare the set of module names imported in `mutated_code` against those in
+`original_code`." Implementation: `_ImportCollector` visits the ENTIRE CST tree including
+imports inside functions, classes, and conditionals. A mutation that adds a lazy `import
+os` inside a function body is treated the same as adding it at module level.
+
+This is a behavioral detail that affects how aggressive the filter is. The spec should
+state: "module names imported anywhere in the code, at any nesting level, are compared."
+
+**VP-4 (MEDIUM): Import guard when `original_code` has syntax error**
+
+`_extract_imports` catches `cst.ParserSyntaxError` and returns `set()`. If `original_code`
+were malformed, the original set would be empty, and ANY import in `mutated_code` would
+trigger rejection. The spec doesn't address this edge case. (In practice, `original_code`
+is existing source that presumably parses, but the behavioral contract should be complete.)
+
+**VP-5 (LOW): Rejection reporting uses click.echo, not Python warnings**
+
+Spec says "A rejection MUST be accompanied by a warning or logged message." Implementation
+uses `click.echo(f"    Rejected: {err}")` which writes to stdout, not to
+`warnings.warn()`. This means rejection messages bypass Python's warning filter
+infrastructure entirely. If callers redirect stdout or want to suppress messages,
+`click.echo` cannot be filtered. The spec should say "written to stdout" or change
+behavior to use `warnings.warn`.
+
+---
+
+## Cost Tracking Accuracy Issues
+
+**CT-1 (HIGH): Cost silently zero when API response lacks usage field**
+
+Spec says "Token counts are taken from the API response's usage fields. If a field is
+absent from the response, its count defaults to zero." It does NOT say what happens to
+cost in this case.
+
+Implementation: if `response.usage` is None, all token counts are 0. `calculate_cost()`
+is called with all zeros. Cost is 0. No warning is emitted.
+
+The spec must address this explicitly: "If the API usage field is absent, cost is recorded
+as zero. No warning is emitted for zero-cost entries." This is a known source of silent
+cost undercount.
+
+**CT-2 (HIGH): Pricing table becomes stale; fallback causes cost underestimation**
+
+Spec says "For unknown model names, the calculation MUST fall back to the Sonnet pricing
+tier." Implementation: `MODEL_PRICING.get(model)` → if None, uses `claude-sonnet-4-6`
+pricing ($3/$15 per million tokens). If the actual model is Opus-class ($5–$15/$25–$75),
+cost is severely underestimated. The spec does not describe the MAGNITUDE of the
+underestimation risk. Consider documenting: "The fallback is Sonnet tier pricing; using an
+Opus-class model with an unrecognized name will result in significant cost
+underestimation."
+
+**CT-3 (MEDIUM): Cumulative cost includes entries with $0 cost**
+
+If any historical entries have `cost_usd = 0.0` (from the silent-zero case in CT-1, or
+from pre-cost-tracking generations), `RunResult.total_llm_cost_usd` includes them but
+they contribute nothing. The spec says cumulative cost is the sum of all cache entries,
+but doesn't note that zero-cost entries from API failures permanently contribute nothing,
+making historical totals permanently understated.
+
+---
+
+## Concurrency Contract Gaps
+
+**CON-1 (CRITICAL): SPEC WRONG — `n_targets = 0` path cannot occur**
+
+Spec says "When `n_targets = 0`, returns `min_concurrency`."
+
+The implementation calls `_compute_concurrency(len(work_items), config)` AFTER an early
+return: `if not work_items: return 0`. So `_compute_concurrency` is NEVER called with
+`n_targets = 0`. The spec documents an unreachable case, creating the false impression
+that 0-target generation still sets up a semaphore at `min_concurrency`.
+
+**CON-2 (HIGH): Execution order ≠ result collection order**
+
+Spec says "Targets are scheduled in ascending `file_path` order before execution begins"
+and "Results are collected in task creation order."
+
+With the `TrackedSemaphore`, tasks can EXECUTE in any order (first available slot wins,
+FIFO not guaranteed). Tasks with later file_path names can complete before earlier ones.
+Results are only AWAITED in file_path order. Cache writes happen when results are awaited,
+which IS in file_path order. The spec must clarify: execution order is non-deterministic;
+ONLY the result-awaiting (and thus cache-write) order is file_path-sorted.
+
+**CON-3 (MEDIUM): No isolation guarantee for concurrent writes to DIFFERENT entries**
+
+The spec says "Concurrent tasks MUST NOT share mutable state; each target's generation and
+cache write are independent." This is accurate but incomplete. Two tasks writing DIFFERENT
+cache entries (different filenames) hold DIFFERENT locks. This is safe. But the spec
+doesn't explicitly state that inter-entry isolation is guaranteed even without global
+locking. It should say: "two tasks generating different functions MUST NOT interfere with
+each other's cache entries."
+
+---
+
+## Cancellation Contract Gaps
+
+**CAN-1 (CRITICAL): SPEC WRONG — KeyboardInterrupt path does NOT await tasks**
+
+Spec says: "In-flight tasks are awaited to completion (either naturally or cancelled)
+before the generation function returns."
+
+Implementation: the `except KeyboardInterrupt` block (pipeline.py line 535-538):
+```python
+except KeyboardInterrupt:
+    click.echo("\nForced exit. Cancelling all tasks...")
+    for _, _, t in tasks:
+        t.cancel()
+```
+Tasks are cancelled but NOT awaited. The `with _sigint_handler(cancel_event):` block then
+exits (restoring the signal handler). `pbar.close()` runs. The function returns. Cancelled
+tasks may still be executing.
+
+The SIGINT (first Ctrl-C) path IS correct — tasks are awaited via the main loop. But the
+KeyboardInterrupt path is not. The spec must either (a) fix the implementation, (b) scope
+the invariant to "first-SIGINT cancellation only," or (c) document this as a known
+limitation.
+
+**CAN-2 (HIGH): Lock file not cleaned up on forced exit**
+
+If a task is cancelled while holding a `file_lock` (i.e., inside `atomic_write`), the
+`finally` block in `file_lock` releases the lock and closes the fd. This IS safe because
+Python's `finally` runs on `CancelledError`. But: if the PROCESS is terminated externally
+(SIGKILL, OOM, power loss) while a lock is held, the `.lock` sidecar file persists.
+Subsequent runs will attempt to acquire the same lock and succeed (since `fcntl.flock` is
+per-open-file-description and the file descriptor no longer exists), but the stale
+`.lock` file is never cleaned up. Over time, stale lock files accumulate. The spec should
+document: "Stale `.lock` sidecar files may persist after unclean termination. They do not
+prevent future runs but accumulate until manually removed."
+
+**CAN-3 (MEDIUM): Second SIGINT behavior is asyncio-version-dependent**
+
+The spec says "A `KeyboardInterrupt` (e.g., second Ctrl-C) while awaiting tasks MUST
+cancel all outstanding tasks." But: the `_sigint_handler` context manager installs a
+custom handler that sets `cancel_event` (not raise). A second SIGINT also calls the same
+custom handler. Only when Python's asyncio event loop itself raises `KeyboardInterrupt`
+(from signal delivery during `await`) does the `except KeyboardInterrupt` path trigger.
+This behavior is asyncio-version and platform-dependent. On some versions, rapid successive
+SIGINTs may be coalesced. The spec should not present this as a guarantee.
+
+---
+
+## Configuration Edge Cases Not Addressed
+
+**CFG-1 (BLOCKER): Spec wrong about where validation occurs**
+
+Spec says: "`LLMConfig.__post_init__` MUST raise `ValueError` if any constraint is
+violated."
+
+Implementation: `load_config` creates `LLMConfig()` (with defaults — `__post_init__` runs
+on defaults, always passes), then sets fields directly WITHOUT re-triggering `__post_init__`.
+
+Constraints validated in `__post_init__` include `min_concurrency >= 1`,
+`max_concurrency >= min_concurrency`, `max_retries >= 0`, `base_backoff_seconds > 0`,
+`request_timeout_seconds >= 10`. NONE of these are re-validated after `load_config` sets
+them from pyproject.toml.
+
+**Only `temperature` and `cache_ttl` are validated in `load_config` itself.**
+
+This means:
+- `min_concurrency = 100, max_concurrency = 5` in pyproject → SILENTLY ACCEPTED
+- `request_timeout_seconds = 1` in pyproject → SILENTLY ACCEPTED
+- `base_backoff_seconds = 0` in pyproject → SILENTLY ACCEPTED
+- `LLMConfig(temperature=2.0)` created directly → NOT VALIDATED (temperature validation
+  is in `load_config`, not `__post_init__`)
+
+The spec must be rewritten to accurately describe which constraints are enforced at
+construction time vs. load time, and which can be bypassed entirely.
+
+**CFG-2 (HIGH): `api_key` is environment-only; pyproject cannot set it**
+
+Spec says "Priority: (1) ANTHROPIC_API_KEY env var, (2) [tool.mutmut.llm] pyproject, (3)
+defaults." This implies pyproject could in principle set `api_key`.
+
+In reality, `load_config` never reads `api_key` from pyproject. The `api_key` field in
+`LLMConfig` can ONLY be set via `ANTHROPIC_API_KEY` environment variable. Setting
+`api_key = "..."` in pyproject.toml is silently ignored. The priority list must be
+corrected: "api_key: from ANTHROPIC_API_KEY env var only (pyproject cannot set it)."
+
+**CFG-3 (MEDIUM): `max_mutations_per_function = 0` behavior not documented**
+
+Spec says this is an Open Question. But the current behavior is observable: when budget
+allocation runs with `max_mutations_per_function = 0`, the formula
+`min(max_mutations_per_function, max(1, total_budget // len(targets)))` resolves to
+`min(0, ...)` = 0. No mutations are requested per function. The API is called but returns
+0 mutations. Cache entries are written with empty mutations lists. This should be stated
+as current behavior, not left as an open question.
+
+**CFG-4 (LOW): Float-to-int truncation in config loading**
+
+`load_config` coerces `int(section["max_mutations_per_function"])`. If pyproject.toml
+contains `max_mutations_per_function = 5.5`, the value becomes `5` with no warning. The
+spec doesn't document truncation behavior for out-of-type config values.
+
+---
+
+## Missing Invariants
+
+**MI-1 (HIGH): Class method function name format not specified**
+
+The cache key includes `function_name`. For class methods, `resolve_scope_deep` (scope.py)
+extracts function names. What name does it use — `"method"` or `"ClassName.method"`?
+`_extract_function_name` in plugin.py returns `"ClassName.method"` for methods. If the
+scope uses a different format, the identification in `mutmut_mutations_created` will fail
+silently (counts will be 0 for all class methods, no LLM mutations identified).
+
+The spec must specify: "Cache entries for class methods MUST use the function name as it
+appears in `_extract_function_name`'s output (i.e., `'ClassName.method'`)."
+
+**MI-2 (HIGH): `generate` CLI default scan path undocumented**
+
+When `mutmut generate` is called with no `--paths` argument and mutmut has no configured
+paths, the code defaults to scanning `["src"]`. This is an undocumented behavior with
+significant consequences (missing all functions if the project root isn't `./src/`). The
+spec should document the default.
+
+**MI-3 (MEDIUM): Budget 0 behavior undefined**
+
+Spec says "budget counts API calls" but doesn't say what happens with `budget = 0`.
+Implementation: the loop `if len(work_items) >= total_budget: break` triggers immediately
+at `total_budget = 0`, so zero work items are added and the function returns `0`. This
+should be stated explicitly.
+
+**MI-4 (MEDIUM): `operator_llm` performance: cache loaded at most once per run**
+
+Spec says "The cache index MUST be built at most once per mutmut run (lazy, on first
+operator call). It is reset between runs via `mutmut_configure`." This is a correct and
+important invariant for performance. However, the spec doesn't say what "cache index" is —
+it's a mapping from `source_hash → list[CachedMutation]`. The spec should be explicit
+about what is loaded (the full mutation set for ALL cached functions, not individual
+lookups).
+
+**MI-5 (LOW): `dry_run` path doesn't check `base_dir`**
+
+Spec says `dry_run` returns 0 and makes no API calls. But `dry_run` also returns 0
+without checking `base_dir`, meaning the cache is checked for hits (to report which
+functions are cached vs. uncached) but using the default `cwd` rather than `base_dir`.
+Undocumented.
+
+---
+
+## Contradictions with Code
+
+**CONTRA-1 (CRITICAL): Sync error handling diverges from async, undocumented**
+
+Spec describes a single retry/backoff/cancellation contract but there are TWO code paths:
+
+- `_call_llm_and_validate` (sync): `except Exception: return GenerationResult(mutations=[])`
+  — swallows ALL exceptions, logs a warning, returns empty result. No classification. No
+  retry. No STOP propagation. A quota error (should STOP) is silently treated as a miss.
+
+- `_call_llm_and_validate_async` (async): only catches `asyncio.TimeoutError`, re-raises
+  all others to `_call_llm_async` for classification and retry.
+
+The spec documents only the async contract. The sync wrapper exists "for backward
+compatibility" but is independently tested. If it's a public contract, its divergent error
+handling must be specified. If it's private, it must be removed from the spec.
+
+**CONTRA-2 (HIGH): `_compute_concurrency` never called with n_targets=0 (see CON-1)**
+
+**CONTRA-3 (HIGH): KeyboardInterrupt tasks not awaited (see CAN-1)**
+
+**CONTRA-4 (MEDIUM): STOP error in `_call_llm_async` re-raises into orchestrator loop**
+
+Spec says "On STOP error: the cancel event MUST be set and the exception MUST be re-raised,
+causing the generation run to terminate after completing any in-flight tasks."
+
+Implementation: when `classify_error` returns STOP, `_call_llm_async` sets cancel_event
+and raises. The exception is caught in `_generate_mutations_async` at line 494
+(`except Exception as exc`), re-classified as STOP, and tasks are cancelled (but NOT
+awaited before continuing the loop). The spec says "after completing any in-flight tasks"
+— but the in-flight tasks are only cancelled, not awaited, at the point of STOP detection.
+They are awaited LATER as the main loop encounters them. The sequencing guarantee is
+accurate in outcome but misleading in description.
+
+**CONTRA-5 (MEDIUM): `RunResult` `run_id` is UUID hex prefix, not "12-character hex UUID"**
+
+Spec says "Each mutmut run MUST generate a unique `run_id` (12-character hex UUID prefix)."
+Implementation: `uuid4().hex[:12]` — this is a 12-character prefix of a UUIDv4 hex
+string (32 hex chars), giving 48 bits of randomness. The spec should specify the collision
+probability or just say "pseudo-random identifier with sufficient entropy for practical
+uniqueness within a project."
+
+---
+
+## Verdict
+
+The draft is detailed and honest about limitations. The self-critique (critique1) caught
+most of the implementation-detail leakage. This second pass found:
+
+**Must fix before the spec is trustworthy:**
+1. CFG-1 (BLOCKER): Spec is factually wrong about where validation occurs. `__post_init__`
+   does NOT validate fields set by `load_config`. Most field constraints are unenforceable
+   via pyproject.toml.
+2. CAN-1 (CRITICAL): KeyboardInterrupt path does NOT await tasks. The universal invariant
+   "in-flight tasks are awaited before return" is false.
+3. CC-1 (CRITICAL): Function name not sanitized — key uniqueness claim is false.
+4. CONTRA-1 (CRITICAL): Sync path exists with completely different error handling; the
+   spec documents only the async contract.
+5. CON-1 (CRITICAL): `n_targets=0` case is unreachable; spec documents phantom behavior.
+
+**Should fix before spec is complete:**
+- CFG-2: `api_key` is env-only; priority list is misleading.
+- CT-1/CT-2: Cost silently zero on missing usage; Sonnet fallback risks opus-sized
+  underestimation.
+- VP-1/VP-2: "Valid syntax" = libcst-parseable, pragma guard = position-not-content.
+- MI-1: Class method function name format unspecified (cache key mismatch risk).
+- CC-5: POSIX-only locking undisclosed.
+- IL-1/IL-2: Replace mechanism language with behavioral guarantees.

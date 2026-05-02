@@ -118,7 +118,7 @@ def _referenced_names(source: str) -> set[str]:
     except cst.ParserSyntaxError:
         return set()
     collector = _NameCollector()
-    tree.walk(collector)
+    tree.visit(collector)
     return collector.names
 
 def _build_module_context(module: cst.Module, function_source: str) -> str:

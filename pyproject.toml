@@ -19,3 +19,14 @@ mutmut-dedup = { workspace = true }
 [tool.uv.workspace]
 members = ["mutmut", "mutmut-extras", "mutmut-llm", "mutmut-dedup"]
 exclude = ["mutmut/e2e_projects/*"]
+
+[tool.basedpyright]
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.13"
+exclude = [
+    ".claude/worktrees/**",
+    "mutmut/e2e_projects/**",
+    "**/.git/**",
+]

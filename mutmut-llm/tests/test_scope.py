@@ -12,6 +12,8 @@ from mutmut_llm.scope import (
     ScopeTarget,
     _allocate_budget,
     _branch_count,
+    _build_class_context,
+    _build_module_context,
     _discover_python_files,
     _extract_assign_targets,
     _extract_functions,
@@ -129,7 +131,7 @@ class TestExtractFunctions:
         targets = _extract_functions(sample_file)
         method = next(t for t in targets if t.function_name == "MyClass.method")
         assert "class MyClass:" in method.context
-        assert "def method(self): ..." in method.context
+        assert "def method(self): ..." not in method.context  # H4: target stub excluded, full source provided separately
         assert "def other_method(self, x): ..." in method.context
         assert "attr = 42" in method.context
 
@@ -808,7 +810,7 @@ class TestContextIntegration:
         targets = _extract_functions(str(p))
 
         add_target = next(t for t in targets if t.function_name == "Calculator.add")
-        assert "def add(self, a: int, b: int) -> int: ..." in add_target.context
+        assert "def add(self, a: int, b: int) -> int: ..." not in add_target.context  # H4: target stub excluded
         assert "def subtract(self, a: int, b: int) -> int: ..." in add_target.context
         assert "def multiply(self, a: int, b: int) -> int: ..." in add_target.context
         # Bodies should not leak
