@@ -12,8 +12,9 @@ UV workspace extending mutmut with additional mutation operators.
 
 - `mutmut/` — Git submodule tracking upstream mutmut. Patch sparingly.
 - `mutmut-extras/` — Plugin package providing extra mutation operators (entry point: `mutmut_extras.plugin`).
+- `mutmut-llm/` — Plugin package for LLM-powered mutation generation (Anthropic, async, cached).
+- `mutmut-dedup/` — Plugin package for structural + bytecode deduplication of mutations.
 - `conflict-resolution/` — Guides for resolving conflicts when syncing upstream changes to `mutmut/`.
-- `plans/` — Issue drafts and implementation plans for future work.
 
 ## Commands
 
@@ -36,6 +37,18 @@ uv run --package mutmut pytest mutmut/tests/e2e/     # e2e tests
 ## Plugin isolation
 
 Core mutmut tests run with `MUTMUT_DISABLE_PLUGIN_AUTOLOAD=1` (via `mutmut/tests/conftest.py`) to prevent `mutmut-extras` from injecting mutations into the core test expectations. See `conflict-resolution/plugin-autoload-isolation.md`.
+
+## Planning and progress files
+
+`plans/`, `PROGRESS.md`, `PICK_UP_HERE.md`, and similar agent-generated artifacts are gitignored. These files are fine to create and commit while a feature is in flight, but **must be removed from git before a final merge commit**:
+
+```bash
+git rm -r plans/          # if staged
+rm -rf plans/             # if untracked
+git rm PROGRESS.md PICK_UP_HERE.md 2>/dev/null || true
+```
+
+The same applies to spec drafts (`SPEC.md.draft*`, `SPEC.md.critique*`) and `.agent/` tooling directories — create freely during development, clean up before merging.
 
 ## Style rules
 

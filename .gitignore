@@ -19,3 +19,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 uv.lock
+
+# Agent/tooling artifacts — gitignored but safe to commit during development
+plans/
+PROGRESS.md
+PICK_UP_HERE.md
+SPEC.md.draft*
+SPEC.md.critique*
+.agent/
+*.orig
