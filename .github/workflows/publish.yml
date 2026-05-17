@@ -36,7 +36,7 @@ jobs:
       - name: Build package
         run: |
           cd ${{ matrix.package }}
-          uv build
+          uv build --out-dir dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -95,7 +95,7 @@ def live_pipeline_result(tmp_path_factory):
 
     (project_dir / "pyproject.toml").write_text(
         "[project]\nname = 'live-test'\nversion = '0.1.0'\n\n"
-        "[tool.mutmut]\npaths_to_mutate = ['src/']\n"
+        "[tool.plugmut]\npaths_to_mutate = ['src/']\n"
     )
 
     config = load_config(env=os.environ)

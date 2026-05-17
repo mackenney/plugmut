@@ -245,11 +245,10 @@ Work through this after all decisions above are finalized:
 Run this before tagging to confirm all placeholder text has been replaced:
 
 ```bash
-grep -r "AUTHOR_NAME\|AUTHOR_EMAIL\|REPO_URL\|RELEASE_DATE\|LICENSE_PLACEHOLDER" \
+grep -r "{{AUTHOR_NAME}}\|{{AUTHOR_EMAIL}}\|{{REPO_URL}}\|RELEASE_DATE\|{{LICENSE}}\|todo@example\.com" \
   mutmut-extras/ mutmut-llm/ mutmut-dedup/ README.md \
   --include="*.toml" --include="*.md"
 # Expected: no output
-```
 
 ---
 
