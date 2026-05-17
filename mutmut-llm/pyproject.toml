@@ -5,14 +5,14 @@ description = "LLM-powered mutation operator for mutmut"
 requires-python = ">=3.10"
 
 dependencies = [
-    "mutmut>=3.5.0",
+    "plugmut>=4.0.0",
     "pluggy>=1.5.0",
     "anthropic>=0.40.0",
     "tomli>=1.1.0; python_version < '3.11'",
     "tqdm>=4.66.0",
 ]
 
-[project.entry-points.mutmut]
+[project.entry-points.plugmut]
 llm = "mutmut_llm.plugin"
 
 [build-system]

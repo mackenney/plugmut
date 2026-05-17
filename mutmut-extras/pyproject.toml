@@ -5,11 +5,11 @@ description = "Extra mutation operators for mutmut"
 requires-python = ">=3.10"
 
 dependencies = [
-    "mutmut>=3.5.0",
+    "plugmut>=4.0.0",
     "pluggy>=1.5.0",
 ]
 
-[project.entry-points.mutmut]
+[project.entry-points.plugmut]
 extras = "mutmut_extras.plugin"
 
 [build-system]
@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 packages = ["src/mutmut_extras"]
 
 [tool.uv.sources]
-mutmut = { workspace = true }
+plugmut = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "LLM-enhanced mutation testing workspace"
 requires-python = ">=3.10"
 dependencies = [
-    "mutmut",
+    "plugmut",
     "mutmut-extras",
     "mutmut-llm",
     "mutmut-dedup",
 ]
 
 [tool.uv.sources]
-mutmut = { workspace = true }
+plugmut = { workspace = true }
 mutmut-extras = { workspace = true }
 mutmut-llm = { workspace = true }
 mutmut-dedup = { workspace = true }
