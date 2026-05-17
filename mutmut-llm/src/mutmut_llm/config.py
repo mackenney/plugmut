@@ -1,10 +1,10 @@
 """LLM configuration loading.
 
-Reads from ``[tool.mutmut.llm]`` in pyproject.toml + ``ANTHROPIC_API_KEY`` env var.
+Reads from ``[tool.plugmut.llm]`` in pyproject.toml + ``ANTHROPIC_API_KEY`` env var.
 
 Supported pyproject.toml keys (all optional)::
 
-    [tool.mutmut.llm]
+    [tool.plugmut.llm]
     model = "claude-sonnet-4-6"
     min_mutations_per_function = 2
     max_mutations_per_function = 5
@@ -12,6 +12,7 @@ Supported pyproject.toml keys (all optional)::
     temperature = 0.6
     enabled = true
     cache_ttl = "5m"
+    generator = "anthropic"
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ _VALID_CACHE_TTLS = {"5m", "1h"}
 class LLMConfig:
     api_key: str = field(default="", repr=False)
     model: str = "claude-sonnet-4-6"
+    generator: str = "anthropic"
     min_mutations_per_function: int = 2
     max_mutations_per_function: int = 5
     max_tokens: int = 4096
@@ -52,6 +54,10 @@ class LLMConfig:
     request_timeout_seconds: int = 120
 
     def __post_init__(self) -> None:
+        if self.generator != "anthropic":
+            raise ValueError(
+                f"Unsupported generator={self.generator!r}. Only 'anthropic' is supported in v1."
+            )
         if self.cache_ttl not in _VALID_CACHE_TTLS:
             raise ValueError(
                 f"Invalid cache_ttl={self.cache_ttl!r}. Must be one of: {', '.join(sorted(_VALID_CACHE_TTLS))}"
@@ -76,7 +82,7 @@ class LLMConfig:
             )
         if self.min_mutations_per_function > self.max_mutations_per_function:
             raise ValueError(
-                f"min_mutations_per_function ({self.min_mutations_per_function}) must be ≤ "
+                f"min_mutations_per_function ({self.min_mutations_per_function}) must be \u2264 "
                 f"max_mutations_per_function ({self.max_mutations_per_function})"
             )
 
@@ -96,10 +102,21 @@ def find_pyproject(start: Path | None = None) -> Path | None:
 
 
 def read_toml_section(path: Path) -> dict:
-    """Return the ``[tool.mutmut.llm]`` dict, or ``{}`` if absent."""
+    """Return the ``[tool.plugmut.llm]`` dict, or ``{}`` if absent.
+
+    Raises ValueError if ``[tool.mutmut.llm]`` exists without ``[tool.plugmut.llm]``.
+    """
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    return data.get("tool", {}).get("mutmut", {}).get("llm", {})
+    tool = data.get("tool", {})
+    new_section = tool.get("plugmut", {}).get("llm", {})
+    old_section = tool.get("mutmut", {}).get("llm", {})
+    if old_section and not new_section:
+        raise ValueError(
+            "Config section [tool.mutmut.llm] is deprecated. "
+            "Rename to [tool.plugmut.llm] in your pyproject.toml."
+        )
+    return new_section
 
 
 def load_config(
@@ -111,7 +128,7 @@ def load_config(
 
     Priority (highest wins):
     1. Environment variable ``ANTHROPIC_API_KEY``
-    2. ``[tool.mutmut.llm]`` in pyproject.toml
+    2. ``[tool.plugmut.llm]`` in pyproject.toml
     3. Dataclass defaults
     """
     if env is None:
@@ -124,6 +141,13 @@ def load_config(
         section = read_toml_section(toml_path)
         if "model" in section:
             config.model = str(section["model"])
+        if "generator" in section:
+            gen = str(section["generator"])
+            if gen != "anthropic":
+                raise ValueError(
+                    f"Unsupported generator={gen!r}. Only 'anthropic' is supported in v1."
+                )
+            config.generator = gen
         if "min_mutations_per_function" in section:
             config.min_mutations_per_function = int(
                 section["min_mutations_per_function"]

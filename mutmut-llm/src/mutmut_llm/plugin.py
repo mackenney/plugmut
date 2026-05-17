@@ -110,6 +110,7 @@ def mutmut_configure(config: object) -> None:
     _reset_cache_index()  # resets legacy index and _library
     _llm_config = load_config()
     from mutmut_llm.library import Library
+
     set_library(Library())
     if hasattr(config, "paths_to_mutate"):
         _mutmut_paths = [str(p) for p in getattr(config, "paths_to_mutate")]  # noqa: B009
@@ -238,7 +239,9 @@ def mutmut_register_commands(cli_group: object) -> None:
             library=library,
             total_budget=budget,
         )
-        click.echo(f"\nDone. {stats.api_calls} API calls, {stats.mutations_generated} mutations generated.")
+        click.echo(
+            f"\nDone. {stats.api_calls} API calls, {stats.mutations_generated} mutations generated."
+        )
 
     @cli_group.command("llm-status")  # type: ignore[union-attr]
     def llm_status() -> None:

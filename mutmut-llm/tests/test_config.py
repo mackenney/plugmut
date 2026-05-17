@@ -76,7 +76,7 @@ class TestPyprojectLoading:
     def test_reads_all_fields(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "claude-haiku-4-5"
 max_mutations_per_function = 10
 max_tokens = 2048
@@ -91,7 +91,7 @@ enabled = false
     def test_partial_override(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "claude-opus-4-6"
 """)
         config = load_config(pyproject_path=pyproject, env={})
@@ -122,7 +122,7 @@ name = "myproject"
         """Unknown keys don't crash loading."""
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "claude-sonnet-4-6"
 unknown_key = "value"
 another_unknown = 42
@@ -167,7 +167,7 @@ class TestReadTomlSection:
     def test_reads_section(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "test-model"
 max_tokens = 1000
 """)
@@ -190,7 +190,7 @@ class TestPriority:
     def test_env_api_key_with_pyproject_model(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "claude-haiku-4-5"
 """)
         config = load_config(
@@ -204,14 +204,14 @@ model = "claude-haiku-4-5"
         """No singleton caching — each call builds fresh."""
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "model-a"
 """)
         config1 = load_config(pyproject_path=pyproject, env={})
         assert config1.model == "model-a"
 
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 model = "model-b"
 """)
         config2 = load_config(pyproject_path=pyproject, env={})
@@ -221,19 +221,19 @@ model = "model-b"
 class TestTemperatureLoading:
     def test_temperature_from_toml(self, tmp_path):
         toml = tmp_path / "pyproject.toml"
-        toml.write_text("[tool.mutmut.llm]\ntemperature = 0.9\n")
+        toml.write_text("[tool.plugmut.llm]\ntemperature = 0.9\n")
         config = load_config(pyproject_path=toml, env={})
         assert config.temperature == 0.9
 
     def test_missing_temperature_defaults(self, tmp_path):
         toml = tmp_path / "pyproject.toml"
-        toml.write_text('[tool.mutmut.llm]\nmodel = "claude-sonnet-4-6"\n')
+        toml.write_text('[tool.plugmut.llm]\nmodel = "claude-sonnet-4-6"\n')
         config = load_config(pyproject_path=toml, env={})
         assert config.temperature == 0.6
 
     def test_temperature_type_is_float(self, tmp_path):
         toml = tmp_path / "pyproject.toml"
-        toml.write_text("[tool.mutmut.llm]\ntemperature = 0.5\n")
+        toml.write_text("[tool.plugmut.llm]\ntemperature = 0.5\n")
         config = load_config(pyproject_path=toml, env={})
         assert isinstance(config.temperature, float)
         assert config.temperature == 0.5
@@ -244,7 +244,7 @@ class TestTemperatureLoading:
         toml = tmp_path / "pyproject.toml"
         toml.write_text(
             textwrap.dedent("""\
-            [tool.mutmut.llm]
+            [tool.plugmut.llm]
             model = "claude-haiku-4-5"
             max_mutations_per_function = 10
             max_tokens = 8192
@@ -264,7 +264,7 @@ class TestTemperatureValidation:
     def test_temperature_above_one_raises(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 temperature = 1.5
 """)
         with pytest.raises(ValueError, match="temperature must be in"):
@@ -273,7 +273,7 @@ temperature = 1.5
     def test_temperature_negative_raises(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 temperature = -0.1
 """)
         with pytest.raises(ValueError, match="temperature must be in"):
@@ -283,7 +283,7 @@ temperature = -0.1
         for temp in (0.0, 0.5, 1.0):
             pyproject = tmp_path / "pyproject.toml"
             pyproject.write_text(f"""\
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 temperature = {temp}
 """)
             config = load_config(pyproject_path=pyproject, env={})
@@ -297,19 +297,20 @@ class TestMinMutationsConfig:
 
     def test_min_mutations_from_toml(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text("[tool.mutmut.llm]\nmin_mutations_per_function = 3\n")
+        pyproject.write_text("[tool.plugmut.llm]\nmin_mutations_per_function = 3\n")
         config = load_config(pyproject_path=pyproject, env={})
         assert config.min_mutations_per_function == 3
 
     def test_min_mutations_not_in_toml_uses_default(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text('[tool.mutmut.llm]\nmodel = "claude-sonnet-4-6"\n')
+        pyproject.write_text('[tool.plugmut.llm]\nmodel = "claude-sonnet-4-6"\n')
         config = load_config(pyproject_path=pyproject, env={})
         assert config.min_mutations_per_function == 2
 
     def test_min_greater_than_max_raises(self):
         with pytest.raises(ValueError, match="min_mutations_per_function"):
             LLMConfig(min_mutations_per_function=10, max_mutations_per_function=3)
+
 
 class TestTTLValidation:
     def test_invalid_ttl_10m_raises(self):
@@ -332,7 +333,7 @@ class TestTTLValidation:
 
     def test_config_rejects_invalid_ttl_from_toml(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text('[tool.mutmut.llm]\ncache_ttl = "10m"\n')
+        pyproject.write_text('[tool.plugmut.llm]\ncache_ttl = "10m"\n')
         with pytest.raises(ValueError, match="Invalid cache_ttl"):
             load_config(pyproject_path=pyproject, env={})
 
@@ -408,7 +409,7 @@ class TestLLMConfigNewFields:
 
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("""
-[tool.mutmut.llm]
+[tool.plugmut.llm]
 min_concurrency = 3
 max_concurrency = 12
 max_retries = 2
@@ -421,3 +422,58 @@ request_timeout_seconds = 30
         assert config.max_retries == 2
         assert config.base_backoff_seconds == 0.5
         assert config.request_timeout_seconds == 30
+
+
+class TestConfigSectionMigration:
+    def test_old_section_raises_migration_error(self, tmp_path):
+        from mutmut_llm.config import read_toml_section
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[tool.mutmut.llm]\nenabled = true\n")
+        with pytest.raises(ValueError, match="deprecated"):
+            read_toml_section(pyproject)
+
+    def test_new_section_works(self, tmp_path):
+        from mutmut_llm.config import read_toml_section
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[tool.plugmut.llm]\nenabled = true\n")
+        section = read_toml_section(pyproject)
+        assert section["enabled"] is True
+
+    def test_both_sections_uses_new_without_error(self, tmp_path):
+        """When both sections exist, new wins and no error is raised."""
+        from mutmut_llm.config import read_toml_section
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[tool.mutmut.llm]\nmodel = 'old'\n[tool.plugmut.llm]\nmodel = 'new'\n"
+        )
+        section = read_toml_section(pyproject)
+        assert section["model"] == "new"
+
+
+class TestGeneratorField:
+    def test_default_is_anthropic(self):
+        config = LLMConfig()
+        assert config.generator == "anthropic"
+
+    def test_unsupported_generator_raises(self):
+        with pytest.raises(ValueError, match="Only 'anthropic' is supported"):
+            LLMConfig(generator="openai")
+
+    def test_anthropic_accepted(self):
+        config = LLMConfig(generator="anthropic")
+        assert config.generator == "anthropic"
+
+    def test_generator_from_toml(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.plugmut.llm]\ngenerator = "anthropic"\n')
+        config = load_config(pyproject_path=pyproject)
+        assert config.generator == "anthropic"
+
+    def test_unsupported_generator_in_toml_raises(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.plugmut.llm]\ngenerator = "openai"\n')
+        with pytest.raises(ValueError, match="Only 'anthropic' is supported"):
+            load_config(pyproject_path=pyproject)
