@@ -52,6 +52,15 @@ class TestOperatorVoidCallRemoval:
         mutants = list(operator_void_call_removal(node))
         assert mutants == []
 
+    def test_super_init_no_mutation(self):
+        node = _parse_stmt("super().__init__(x)")
+        mutants = list(operator_void_call_removal(node))
+        assert mutants == []
+
+    def test_super_save_no_mutation(self):
+        node = _parse_stmt("super().save()")
+        mutants = list(operator_void_call_removal(node))
+        assert mutants == []
 
 @pytest.fixture(autouse=True)
 def _isolate_plugins(monkeypatch):
