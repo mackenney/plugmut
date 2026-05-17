@@ -1,10 +1,10 @@
 """Live API integration tests for the mutmut-llm plugin.
 
-Gated behind MUTMUT_LLM_E2E_LIVE=1 to prevent accidental API spend.
+Gated behind PLUGMUT_LLM_E2E_LIVE=1 to prevent accidental API spend.
 Requires ANTHROPIC_API_KEY to be set with a valid key.
 
 Run with:
-    MUTMUT_LLM_E2E_LIVE=1 uv run --package mutmut-llm pytest mutmut-llm/tests/e2e/test_e2e_live.py -v
+    PLUGMUT_LLM_E2E_LIVE=1 uv run --package mutmut-llm pytest mutmut-llm/tests/e2e/test_e2e_live.py -v
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ from mutmut_llm.generators.anthropic import (
 from mutmut_llm.discovery import GenerationTarget as ScopeTarget
 from mutmut_llm.validation import validate_imports
 
-LIVE_ENABLED = os.environ.get("MUTMUT_LLM_E2E_LIVE") == "1"
+LIVE_ENABLED = os.environ.get("PLUGMUT_LLM_E2E_LIVE") == "1"
 HAS_API_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 skip_no_live = pytest.mark.skipif(
     not (LIVE_ENABLED and HAS_API_KEY),
-    reason="Set MUTMUT_LLM_E2E_LIVE=1 and ANTHROPIC_API_KEY to run live tests",
+    reason="Set PLUGMUT_LLM_E2E_LIVE=1 and ANTHROPIC_API_KEY to run live tests",
 )
 
 SAMPLE_FUNCTION_SOURCE = """\

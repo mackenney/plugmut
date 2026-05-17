@@ -36,7 +36,7 @@ uv run --package mutmut pytest mutmut/tests/e2e/     # e2e tests
 
 ## Plugin isolation
 
-Core mutmut tests run with `MUTMUT_DISABLE_PLUGIN_AUTOLOAD=1` (via `mutmut/tests/conftest.py`) to prevent `mutmut-extras` from injecting mutations into the core test expectations. See `conflict-resolution/plugin-autoload-isolation.md`.
+Core mutmut tests run with `PLUGMUT_DISABLE_PLUGIN_AUTOLOAD=1` (via `mutmut/tests/conftest.py`) to prevent `mutmut-extras` from injecting mutations into the core test expectations. See `conflict-resolution/plugin-autoload-isolation.md`.
 
 ## Planning and progress files
 

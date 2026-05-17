@@ -137,13 +137,13 @@ def test_new_operator_targets_have_mutations(e2e_results):
 
 def test_baseline_comparison():
     """Plugins should produce strictly more mutations than builtins alone."""
-    os.environ["MUTMUT_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    os.environ["PLUGMUT_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     try:
         reset_plugin_manager()
         reset_plugin_operators()
         baseline_results = run_mutmut_on_e2e_project()
     finally:
-        del os.environ["MUTMUT_DISABLE_PLUGIN_AUTOLOAD"]
+        del os.environ["PLUGMUT_DISABLE_PLUGIN_AUTOLOAD"]
         reset_plugin_manager()
         reset_plugin_operators()
 

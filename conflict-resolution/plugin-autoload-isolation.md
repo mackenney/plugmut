@@ -16,11 +16,11 @@ from mutmut.plugin_manager import reset_plugin_manager
 @pytest.fixture(autouse=True, scope="session")
 def _disable_plugin_autoload():
     """Prevent third-party plugins from loading during core tests."""
-    os.environ["MUTMUT_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    os.environ["PLUGMUT_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     reset_plugin_manager()
     reset_plugin_operators()
     yield
-    os.environ.pop("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", None)
+    os.environ.pop("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", None)
     reset_plugin_manager()
     reset_plugin_operators()
 ```
@@ -37,7 +37,7 @@ snapshot mismatches and assertion failures in tests like `test_module_mutation`,
 `test_basic_class`, `test_basic_mutations`, and others — the mutant count and
 numbering shift because extra mutations are injected.
 
-The `MUTMUT_DISABLE_PLUGIN_AUTOLOAD` env var is already respected by
+The `PLUGMUT_DISABLE_PLUGIN_AUTOLOAD` env var is already respected by
 `plugin_manager.py` (both upstream and here). The conftest sets it before any
 test runs, then resets the singleton plugin manager to ensure a clean state.
 
@@ -45,7 +45,7 @@ test runs, then resets the singleton plugin manager to ensure a clean state.
 
 1. `plugin_manager.py` holds a module-level singleton `_pm`
 2. `get_plugin_manager()` lazily initializes it, loading entry points unless
-   `MUTMUT_DISABLE_PLUGIN_AUTOLOAD` is set
+   `PLUGMUT_DISABLE_PLUGIN_AUTOLOAD` is set
 3. `reset_plugin_manager()` nulls `_pm` so the next call re-initializes
 4. `file_mutation.py` holds a separate module-level cache `_plugin_operators`
    populated by `get_plugin_operators()` on first use
@@ -59,7 +59,7 @@ test runs, then resets the singleton plugin manager to ensure a clean state.
 If upstream adds their own `mutmut/tests/conftest.py`, this file will conflict
 directly. Resolution:
 
-1. Check if upstream's conftest already sets `MUTMUT_DISABLE_PLUGIN_AUTOLOAD`
+1. Check if upstream's conftest already sets `PLUGMUT_DISABLE_PLUGIN_AUTOLOAD`
 2. If yes, drop our version entirely
 3. If no, merge our fixture into their conftest
 4. If upstream changes the env var name or plugin loading mechanism, update the

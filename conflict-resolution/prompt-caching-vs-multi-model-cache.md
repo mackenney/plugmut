@@ -187,7 +187,7 @@ These are orthogonal but live in the same function body.
 uv run --package mutmut-llm pytest mutmut-llm/tests/ -v
 
 # Run live e2e tests if API key available
-MUTMUT_LLM_E2E_LIVE=1 uv run --package mutmut-llm pytest mutmut-llm/tests/e2e/test_e2e_live.py -v
+PLUGMUT_LLM_E2E_LIVE=1 uv run --package mutmut-llm pytest mutmut-llm/tests/e2e/test_e2e_live.py -v
 
 # Ensure core mutmut tests unaffected
 uv run --package mutmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x

@@ -12,7 +12,7 @@ from mutmut_dedup.plugin import mutmut_filter_mutations
 
 @pytest.fixture(autouse=True)
 def _isolate_plugins(monkeypatch):
-    monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
     reset_plugin_operators()
     yield

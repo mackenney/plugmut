@@ -1,0 +1,36 @@
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.12", "3.11", "3.10"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Test core
+        run: uv run --package plugmut pytest mutmut/tests/ -x
+
+      - name: Test extras
+        run: uv run --package mutmut-extras pytest
+
+      - name: Test dedup
+        run: uv run --package mutmut-dedup pytest
+
+      - name: Test llm (unit only)
+        run: uv run --package mutmut-llm pytest mutmut-llm/tests/ --ignore=mutmut-llm/tests/e2e/

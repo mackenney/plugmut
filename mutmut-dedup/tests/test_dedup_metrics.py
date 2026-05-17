@@ -107,7 +107,7 @@ def _run_llm_generation(source_path: Path, cache_dir: Path):
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
     reset_plugin_operators()
     yield

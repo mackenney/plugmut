@@ -10,7 +10,7 @@ from mutmut_extras.operators.ternary import operator_ternary, operators as terna
 
 @pytest.fixture(autouse=True)
 def isolate_plugins(monkeypatch):
-    monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
     reset_plugin_operators()
     pm = get_plugin_manager()

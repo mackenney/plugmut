@@ -56,7 +56,7 @@ def test_assert_false_mutates_to_true():
 
 @pytest.fixture(autouse=True)
 def _isolate_plugins(monkeypatch):
-    monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
     reset_plugin_operators()
     pm = get_plugin_manager()

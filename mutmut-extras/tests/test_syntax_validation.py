@@ -22,7 +22,7 @@ from mutmut_extras.plugin import mutmut_register_operators
 @pytest.fixture(autouse=True)
 def isolate_plugins(monkeypatch):
     """Register all extras operators in an isolated plugin manager."""
-    monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
     reset_plugin_operators()
     pm = get_plugin_manager()

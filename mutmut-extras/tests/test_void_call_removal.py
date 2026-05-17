@@ -66,7 +66,7 @@ class TestOperatorVoidCallRemoval:
 @pytest.fixture(autouse=True)
 def _isolate_plugins(monkeypatch):
     """Reset the plugin manager before and after each test."""
-    monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PLUGMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
     reset_plugin_operators()
     yield
