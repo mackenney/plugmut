@@ -130,7 +130,7 @@ def mutmut_register_operators() -> OPERATORS_TYPE:
 
 @hookimpl
 def mutmut_mutations_created(
-    filename: str, source_by_mutant_name: dict[str, str]
+    filename: str, source_tag_by_mutant_name: dict[str, str]
 ) -> None:
     """Identify which mutants came from the LLM operator.
 
@@ -144,7 +144,7 @@ def mutmut_mutations_created(
 
     # Group mutant names by function name, preserving order
     mutants_by_func: dict[str, list[str]] = defaultdict(list)
-    for mutant_name in source_by_mutant_name:
+    for mutant_name in source_tag_by_mutant_name:
         func_name = _extract_function_name(mutant_name)
         mutants_by_func[func_name].append(mutant_name)
 

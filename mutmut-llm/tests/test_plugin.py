@@ -185,14 +185,14 @@ class TestMutmutMutationsCreated:
             "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
         )
 
-        source_by_mutant_name = {
+        source_tag_by_mutant_name = {
             "x_foo__mutmut_1": "",
             "x_foo__mutmut_2": "",
             "x_foo__mutmut_3": "",
             "x_foo__mutmut_4": "",
         }
         mutmut_mutations_created(
-            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+            filename="src/mod.py", source_tag_by_mutant_name=source_tag_by_mutant_name
         )
 
         assert "x_foo__mutmut_3" in mod._llm_mutant_names
@@ -205,9 +205,9 @@ class TestMutmutMutationsCreated:
 
         monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: [])
 
-        source_by_mutant_name = {"x_foo__mutmut_1": "", "x_foo__mutmut_2": ""}
+        source_tag_by_mutant_name = {"x_foo__mutmut_1": "", "x_foo__mutmut_2": ""}
         mutmut_mutations_created(
-            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+            filename="src/mod.py", source_tag_by_mutant_name=source_tag_by_mutant_name
         )
 
         assert mod._llm_mutant_names == set()
@@ -227,7 +227,7 @@ class TestMutmutMutationsCreated:
             "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
         )
 
-        source_by_mutant_name = {
+        source_tag_by_mutant_name = {
             "x_foo__mutmut_1": "",
             "x_foo__mutmut_2": "",
             "x_bar__mutmut_1": "",
@@ -235,7 +235,7 @@ class TestMutmutMutationsCreated:
             "x_bar__mutmut_3": "",
         }
         mutmut_mutations_created(
-            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+            filename="src/mod.py", source_tag_by_mutant_name=source_tag_by_mutant_name
         )
 
         # Only the last mutant for 'bar' should be LLM (1 LLM mutation)
@@ -262,13 +262,13 @@ class TestMutmutMutationsCreated:
             "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
         )
 
-        source_by_mutant_name = {
+        source_tag_by_mutant_name = {
             "x\u01c1MyClass\u01c1method__mutmut_1": "",
             "x\u01c1MyClass\u01c1method__mutmut_2": "",
             "x\u01c1MyClass\u01c1method__mutmut_3": "",
         }
         mutmut_mutations_created(
-            filename="src/mod.py", source_by_mutant_name=source_by_mutant_name
+            filename="src/mod.py", source_tag_by_mutant_name=source_tag_by_mutant_name
         )
 
         assert "x\u01c1MyClass\u01c1method__mutmut_3" in mod._llm_mutant_names
@@ -557,7 +557,7 @@ class TestFullLifecycle:
         # 2. Mutations created (3 builtin + 1 LLM for compute)
         mutmut_mutations_created(
             filename="src/calc.py",
-            source_by_mutant_name={
+            source_tag_by_mutant_name={
                 "x_compute__mutmut_1": "",
                 "x_compute__mutmut_2": "",
                 "x_compute__mutmut_3": "",
