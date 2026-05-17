@@ -349,7 +349,3 @@ def _allocate_budget(
         budget_left -= n
 
     return alloc
-
-
-# Backward compatibility alias (to be removed in step-08)
-ScopeTarget = GenerationTarget

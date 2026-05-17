@@ -9,6 +9,7 @@ Run with:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,11 +17,15 @@ from pathlib import Path
 import libcst as cst
 import pytest
 
-from mutmut_llm.cache import list_cache_entries, source_hash
+from mutmut_llm.library import Library, source_hash
 from mutmut_llm.config import load_config
-from mutmut_llm.operators import _reset_cache_index
-from mutmut_llm.pipeline import GenerationResult, _call_llm_and_validate, run_generation
-from mutmut_llm.discovery import ScopeTarget
+from mutmut_llm.operators import reset_library
+from mutmut_llm.generators.anthropic import (
+    GenerationResult,
+    AnthropicGenerator,
+    _call_llm_and_validate_async,
+)
+from mutmut_llm.discovery import GenerationTarget as ScopeTarget
 from mutmut_llm.validation import validate_imports
 
 LIVE_ENABLED = os.environ.get("MUTMUT_LLM_E2E_LIVE") == "1"
@@ -64,22 +69,22 @@ def live_generation_result():
     config = load_config(env=os.environ)
     assert config.is_configured, "ANTHROPIC_API_KEY not set"
 
-    client = anthropic.Anthropic(api_key=config.api_key)
+    client = anthropic.AsyncAnthropic(api_key=config.api_key)
     target = ScopeTarget(
         file_path="sample.py",
         function_name="moving_average",
         source=SAMPLE_FUNCTION_SOURCE,
         context=SAMPLE_CONTEXT,
     )
-    result = _call_llm_and_validate(
-        client, config, target, config.max_mutations_per_function
+    result = asyncio.run(
+        _call_llm_and_validate_async(client, config, target, config.max_mutations_per_function)
     )
     return result
 
 
 @pytest.fixture(scope="session")
 def live_pipeline_result(tmp_path_factory):
-    """Run the full pipeline once, reuse across tests needing cache state."""
+    """Run the full pipeline once, reuse across tests needing library state."""
     project_dir = tmp_path_factory.mktemp("live_pipeline")
     src_dir = project_dir / "src"
     src_dir.mkdir()
@@ -92,19 +97,27 @@ def live_pipeline_result(tmp_path_factory):
     )
 
     config = load_config(env=os.environ)
+    library = Library(base_dir=project_dir)
+    generator = AnthropicGenerator(config=config)
     with change_cwd(project_dir):
-        api_calls = run_generation(
-            config=config,
-            paths=["src/sample.py"],
-            budget=1,
-            base_dir=project_dir,
+        stats = generator.run(
+            targets=_resolve_targets(["src/sample.py"]),
+            budget_per_target={},
+            library=library,
+            total_budget=1,
         )
 
     return {
         "project_dir": project_dir,
-        "api_calls": api_calls,
+        "api_calls": stats.api_calls,
         "config": config,
     }
+
+
+def _resolve_targets(paths):
+    from mutmut_llm.discovery import resolve_scope_deep
+    scope = resolve_scope_deep(paths=paths, budget=1)
+    return scope.targets
 
 
 @skip_no_live
@@ -226,8 +239,8 @@ class TestFullPipeline:
 
         assert api_calls == 1, f"Expected 1 API call, got {api_calls}"
 
-        entries = list_cache_entries(base_dir=project_dir)
-        assert len(entries) == 1, f"Expected 1 cache entry, got {len(entries)}"
+        entries = Library(base_dir=project_dir).list_all()
+        assert len(entries) == 1, f"Expected 1 library entry, got {len(entries)}"
 
         entry = entries[0]
         assert entry.function_name == "moving_average"
@@ -239,30 +252,31 @@ class TestFullPipeline:
         )
 
     def test_live_cache_hit_no_api_call(self, live_pipeline_result):
-        """Re-running with same source should hit cache."""
+        """Re-running with same source should hit library cache."""
         project_dir = live_pipeline_result["project_dir"]
         config = live_pipeline_result["config"]
 
+        library = Library(base_dir=project_dir)
+        generator = AnthropicGenerator(config=config)
         with change_cwd(project_dir):
-            result = run_generation(
-                config=config,
-                paths=["src/sample.py"],
-                budget=1,
-                base_dir=project_dir,
+            stats = generator.run(
+                targets=_resolve_targets(["src/sample.py"]),
+                budget_per_target={},
+                library=library,
+                total_budget=1,
             )
 
-        assert result == 0, f"Expected 0 API calls (cache hit), got {result}"
+        assert stats.api_calls == 0, f"Expected 0 API calls (cache hit), got {stats.api_calls}"
 
 
 @skip_no_live
 class TestOperatorReadsCache:
-    """Step 6: Test that cached mutations are picked up by the operator."""
+    """Step 6: Test that library mutations are picked up by the operator."""
 
     def test_live_operator_reads_cache(self, live_pipeline_result):
-        from mutmut_llm.operators import operator_llm
+        from mutmut_llm.operators import operator_llm, set_library
 
         project_dir = live_pipeline_result["project_dir"]
-        _reset_cache_index()
 
         source_text = (project_dir / "src" / "sample.py").read_text()
         module = cst.parse_module(source_text)
@@ -270,14 +284,14 @@ class TestOperatorReadsCache:
             stmt for stmt in module.body if isinstance(stmt, cst.FunctionDef)
         )
 
-        os.chdir(project_dir)
+        lib = Library(base_dir=project_dir)
+        set_library(lib)
         try:
-            _reset_cache_index()
             mutations = list(operator_llm(func_node))
         finally:
-            _reset_cache_index()
+            reset_library()
 
-        assert len(mutations) > 0, "operator_llm returned no mutations from cache"
+        assert len(mutations) > 0, "operator_llm returned no mutations from library"
         for m in mutations:
             assert isinstance(m, cst.FunctionDef)
             assert m.name.value == "moving_average"
@@ -295,7 +309,7 @@ class TestErrorHandling:
         config = load_config(
             env={**os.environ, "ANTHROPIC_API_KEY": "sk-bogus-key-12345"}
         )
-        client = anthropic.Anthropic(api_key="sk-bogus-key-12345")
+        client = anthropic.AsyncAnthropic(api_key="sk-bogus-key-12345")
         target = ScopeTarget(
             file_path="sample.py",
             function_name="moving_average",
@@ -303,7 +317,7 @@ class TestErrorHandling:
             context=SAMPLE_CONTEXT,
         )
 
-        result = _call_llm_and_validate(client, config, target, 3)
+        result = asyncio.run(_call_llm_and_validate_async(client, config, target, 3))
         assert isinstance(result, GenerationResult)
         assert result.mutations == [], (
             f"Expected empty mutations for invalid key, got {result.mutations}"
@@ -314,7 +328,7 @@ class TestErrorHandling:
         import anthropic
 
         config = load_config(env=os.environ)
-        client = anthropic.Anthropic(api_key=config.api_key)
+        client = anthropic.AsyncAnthropic(api_key=config.api_key)
         target = ScopeTarget(
             file_path="sample.py",
             function_name="f",
@@ -322,7 +336,7 @@ class TestErrorHandling:
             context="",
         )
 
-        result = _call_llm_and_validate(client, config, target, 3)
+        result = asyncio.run(_call_llm_and_validate_async(client, config, target, 3))
         assert isinstance(result, GenerationResult)
 
 

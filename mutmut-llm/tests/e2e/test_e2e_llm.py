@@ -26,9 +26,9 @@ from mutmut.__main__ import (
 )
 from mutmut.plugin_manager import reset_plugin_manager
 
-from mutmut_llm.cache import list_cache_entries
+from mutmut_llm.library import Library
 from mutmut_llm.config import load_config
-from mutmut_llm.operators import _reset_cache_index
+from mutmut_llm.operators import reset_library
 from mutmut_llm.pipeline import run_generation
 from mutmut_llm.validation import validate_mutation
 
@@ -54,7 +54,7 @@ def change_cwd(path):
 @pytest.fixture(autouse=True)
 def _clean_e2e_state():
     """Clean caches and mutants before/after each test."""
-    _reset_cache_index()
+    reset_library()
 
     mutants_path = E2E_PROJECT / "mutants"
     cache_path = E2E_PROJECT / ".mutmut-cache"
@@ -65,7 +65,7 @@ def _clean_e2e_state():
 
     yield
 
-    _reset_cache_index()
+    reset_library()
     shutil.rmtree(mutants_path, ignore_errors=True)
     shutil.rmtree(cache_path, ignore_errors=True)
     shutil.rmtree(lib_path, ignore_errors=True)
@@ -95,7 +95,7 @@ class TestGeneration:
 
         assert result == 2, f"Expected 2 API calls (one per function), got {result}"
 
-        entries = list_cache_entries(base_dir=E2E_PROJECT)
+        entries = Library(base_dir=E2E_PROJECT).list_all()
         assert len(entries) == 2, f"Expected 2 cache entries, got {len(entries)}"
 
         func_names = {e.function_name for e in entries}
@@ -115,15 +115,16 @@ class TestGeneration:
                 base_dir=E2E_PROJECT,
             )
 
-        entries = list_cache_entries(base_dir=E2E_PROJECT)
+        entries = Library(base_dir=E2E_PROJECT).list_all()
         assert entries, "No cache entries generated"
 
         for entry in entries:
             for mutation in entry.mutations:
-                err = validate_mutation(mutation.mutated_code, original_source)
+                mutated_code = mutation["mutated_code"]
+                err = validate_mutation(mutated_code, original_source)
                 assert err is None, (
                     f"Mutation for {entry.function_name} failed validation: {err}\n"
-                    f"Code: {mutation.mutated_code}"
+                    f"Code: {mutated_code}"
                 )
 
     def test_generated_mutations_contain_function_defs(self):
@@ -138,12 +139,13 @@ class TestGeneration:
                 base_dir=E2E_PROJECT,
             )
 
-        entries = list_cache_entries(base_dir=E2E_PROJECT)
+        entries = Library(base_dir=E2E_PROJECT).list_all()
         for entry in entries:
             # The function name may be qualified (e.g. "Class.method") — take the bare name
             bare_name = entry.function_name.split(".")[-1]
             for mutation in entry.mutations:
-                module = cst.parse_module(mutation.mutated_code)
+                mutated_code = mutation["mutated_code"]
+                module = cst.parse_module(mutated_code)
                 func_names = [
                     stmt.name.value
                     for stmt in module.body
@@ -152,7 +154,7 @@ class TestGeneration:
                 assert bare_name in func_names, (
                     f"Mutation for {entry.function_name} doesn't contain expected "
                     f"function def '{bare_name}'. Found: {func_names}\n"
-                    f"Code: {mutation.mutated_code}"
+                    f"Code: {mutated_code}"
                 )
 
     def test_generated_mutations_differ_from_original(self):
@@ -175,12 +177,12 @@ class TestGeneration:
                 base_dir=E2E_PROJECT,
             )
 
-        entries = list_cache_entries(base_dir=E2E_PROJECT)
+        entries = Library(base_dir=E2E_PROJECT).list_all()
         for entry in entries:
             bare_name = entry.function_name.split(".")[-1]
             original_code = original_funcs.get(bare_name, "")
             for mutation in entry.mutations:
-                assert mutation.mutated_code.strip() != original_code.strip(), (
+                assert mutation["mutated_code"].strip() != original_code.strip(), (
                     f"Mutation for {entry.function_name} is identical to original"
                 )
 
@@ -383,7 +385,7 @@ class TestOperatorIntegration:
 
         # Now populate cache and run again
         self._prepopulate_cache()
-        _reset_cache_index()
+        reset_library()
         reset_plugin_manager()
         llm_results = self._run_mutmut()
         llm_count = len(llm_results)
@@ -416,12 +418,12 @@ class TestFullLoop:
 
         assert api_calls > 0, "Generation made no API calls"
 
-        entries = list_cache_entries(base_dir=E2E_PROJECT)
+        entries = Library(base_dir=E2E_PROJECT).list_all()
         total_mutations = sum(len(e.mutations) for e in entries)
         assert total_mutations > 0, "No mutations were generated"
 
         # Now run mutmut with the generated cache
-        _reset_cache_index()
+        reset_library()
         mutmut._reset_globals()
         reset_plugin_manager()
 

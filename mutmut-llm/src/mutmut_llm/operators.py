@@ -11,11 +11,9 @@ from collections.abc import Iterable
 
 import libcst as cst
 
-from mutmut_llm.cache import CacheEntry  # kept until step-08
 from mutmut_llm.library import Library, source_hash
 
 _library: Library | None = None
-_cache_index: dict[str, list[CacheEntry]] | None = None  # kept until step-08
 
 
 def set_library(library: Library) -> None:
@@ -28,32 +26,6 @@ def reset_library() -> None:
     """Reset the Library instance. For testing."""
     global _library
     _library = None
-
-
-def _reset_cache_index() -> None:
-    """Shim kept for plugin.py compatibility. Delegates to reset_library()."""
-    global _cache_index
-    _cache_index = None
-    reset_library()
-
-
-def _build_cache_index() -> dict[str, list[CacheEntry]]:
-    """Legacy — kept until step-08."""
-    from mutmut_llm.cache import list_cache_entries as _list
-
-    index: dict[str, list[CacheEntry]] = {}
-    for entry in _list():
-        index.setdefault(entry.source_hash, []).append(entry)
-    return index
-
-
-def _get_cache_index() -> dict[str, list[CacheEntry]]:
-    """Legacy — kept until step-08."""
-    global _cache_index
-    if _cache_index is None:
-        _cache_index = _build_cache_index()
-    return _cache_index
-
 
 def operator_llm(node: cst.FunctionDef) -> Iterable[cst.FunctionDef]:
     """Yield LLM-generated mutations for a function.

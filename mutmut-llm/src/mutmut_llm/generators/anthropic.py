@@ -422,6 +422,13 @@ class AnthropicGenerator:
                         source=target.source,
                         mutations=result.mutations,
                         model=config.model,
+                        metadata={
+                            "cost_usd": result.cost_usd,
+                            "input_tokens": result.input_tokens,
+                            "output_tokens": result.output_tokens,
+                            "cache_creation_tokens": result.cache_creation_tokens,
+                            "cache_read_tokens": result.cache_read_tokens,
+                        },
                     )
                     mutations_stored = sum(len(e.mutations) for e in entries)
                     stats.mutations_generated += mutations_stored

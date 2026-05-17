@@ -8,9 +8,7 @@ import click
 import libcst as cst
 import pytest
 
-from mutmut_llm.cache import CacheEntry
-from mutmut_llm.cache import CachedMutation
-from mutmut_llm.cache import source_hash
+from mutmut_llm.library import Library, LibraryEntry, source_hash
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.plugin import (
     _extract_function_name,
@@ -91,15 +89,13 @@ class TestMutmutConfigure:
 
         assert mod._llm_mutant_names == set()
 
-    def test_resets_cache_index(self, monkeypatch):
+    def test_resets_library(self, monkeypatch):
         import mutmut_llm.operators as ops_mod
 
         monkeypatch.setattr("mutmut_llm.config.find_pyproject", lambda start=None: None)
-        ops_mod._cache_index = {"fake": "data"}
 
         mutmut_configure(config=MagicMock(spec=[]))
 
-        assert ops_mod._cache_index is None  # legacy index cleared
         assert ops_mod._library is not None  # new Library instance set
 
     def test_initializes_current_run(self, monkeypatch):
@@ -166,24 +162,23 @@ class TestMutmutRegisterCommands:
 
 
 class TestMutmutMutationsCreated:
+    def _make_library_entry(self, function_name, file_path, src_hash, mutation_codes):
+        return LibraryEntry(
+            function_name=function_name,
+            file_path=file_path,
+            source_hash=src_hash,
+            model="claude-sonnet-4-6",
+            mutations=[{"mutated_code": c} for c in mutation_codes],
+        )
+
     def test_identifies_llm_mutants(self, monkeypatch):
-        """When cache has 2 LLM mutations for 'foo', the last 2 mutants for that function are LLM."""
+        """When library has 2 LLM mutations for 'foo', the last 2 mutants for that function are LLM."""
         import mutmut_llm.plugin as mod
 
-        cache_entries = [
-            CacheEntry(
-                function_name="foo",
-                file_path="src/mod.py",
-                source_hash="abc123",
-                mutations=[
-                    CachedMutation("code1", "d1"),
-                    CachedMutation("code2", "d2"),
-                ],
-            )
-        ]
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
-        )
+        entry = self._make_library_entry("foo", "src/mod.py", "abc123", ["code1", "code2"])
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = [entry]
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
 
         source_tag_by_mutant_name = {
             "x_foo__mutmut_1": "",
@@ -200,10 +195,24 @@ class TestMutmutMutationsCreated:
         assert "x_foo__mutmut_1" not in mod._llm_mutant_names
         assert "x_foo__mutmut_2" not in mod._llm_mutant_names
 
-    def test_no_cache_entries_no_llm_mutants(self, monkeypatch):
+    def test_no_library_entries_no_llm_mutants(self, monkeypatch):
         import mutmut_llm.plugin as mod
 
-        monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: [])
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = []
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
+
+        source_tag_by_mutant_name = {"x_foo__mutmut_1": "", "x_foo__mutmut_2": ""}
+        mutmut_mutations_created(
+            filename="src/mod.py", source_tag_by_mutant_name=source_tag_by_mutant_name
+        )
+
+        assert mod._llm_mutant_names == set()
+
+    def test_no_library_instance_no_llm_mutants(self, monkeypatch):
+        import mutmut_llm.plugin as mod
+
+        monkeypatch.setattr(mod, "_library_instance", None)
 
         source_tag_by_mutant_name = {"x_foo__mutmut_1": "", "x_foo__mutmut_2": ""}
         mutmut_mutations_created(
@@ -215,17 +224,10 @@ class TestMutmutMutationsCreated:
     def test_multiple_functions_mixed(self, monkeypatch):
         import mutmut_llm.plugin as mod
 
-        cache_entries = [
-            CacheEntry(
-                function_name="bar",
-                file_path="src/mod.py",
-                source_hash="xyz",
-                mutations=[CachedMutation("code1", "d1")],
-            )
-        ]
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
-        )
+        entry = self._make_library_entry("bar", "src/mod.py", "xyz", ["code1"])
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = [entry]
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
 
         source_tag_by_mutant_name = {
             "x_foo__mutmut_1": "",
@@ -242,25 +244,18 @@ class TestMutmutMutationsCreated:
         assert "x_bar__mutmut_3" in mod._llm_mutant_names
         assert "x_bar__mutmut_1" not in mod._llm_mutant_names
         assert "x_bar__mutmut_2" not in mod._llm_mutant_names
-        # 'foo' has no cache entries
+        # 'foo' has no library entries
         assert "x_foo__mutmut_1" not in mod._llm_mutant_names
         assert "x_foo__mutmut_2" not in mod._llm_mutant_names
 
     def test_class_method_mutants_matched(self, monkeypatch):
-        """Cache stores 'MyClass.method'; mutant names use ǁ separator. They must match."""
+        """Library stores 'MyClass.method'; mutant names use ǁ separator. They must match."""
         import mutmut_llm.plugin as mod
 
-        cache_entries = [
-            CacheEntry(
-                function_name="MyClass.method",
-                file_path="src/mod.py",
-                source_hash="abc",
-                mutations=[CachedMutation("code1", "d1")],
-            )
-        ]
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
-        )
+        entry = self._make_library_entry("MyClass.method", "src/mod.py", "abc", ["code1"])
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = [entry]
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
 
         source_tag_by_mutant_name = {
             "x\u01c1MyClass\u01c1method__mutmut_1": "",
@@ -316,7 +311,7 @@ class TestMutmutPostRun:
 
         run = new_run()
         monkeypatch.setattr(mod, "_current_run", run)
-        monkeypatch.setattr("mutmut_llm.plugin.list_cache_entries", lambda: [])
+        monkeypatch.setattr(mod, "_library_instance", None)
 
         cache_root = tmp_path / "cache"
         monkeypatch.setattr(
@@ -334,36 +329,34 @@ class TestMutmutPostRun:
         assert loaded is not None
         assert loaded.run_id == run.run_id
 
-    def test_aggregates_cost_from_cache(self, monkeypatch, tmp_path):
+    def test_aggregates_cost_from_library(self, monkeypatch, tmp_path):
         import mutmut_llm.plugin as mod
         from mutmut_llm import storage
 
         run = new_run()
         monkeypatch.setattr(mod, "_current_run", run)
 
-        cache_entries = [
-            CacheEntry(
+        library_entries = [
+            LibraryEntry(
                 function_name="f1",
                 file_path="a.py",
                 source_hash="h1",
+                model="m",
                 mutations=[],
-                cost_usd=0.01,
-                input_tokens=1000,
-                output_tokens=500,
+                metadata={"cost_usd": 0.01, "input_tokens": 1000, "output_tokens": 500},
             ),
-            CacheEntry(
+            LibraryEntry(
                 function_name="f2",
                 file_path="b.py",
                 source_hash="h2",
+                model="m",
                 mutations=[],
-                cost_usd=0.02,
-                input_tokens=2000,
-                output_tokens=1000,
+                metadata={"cost_usd": 0.02, "input_tokens": 2000, "output_tokens": 1000},
             ),
         ]
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
-        )
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = library_entries
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
 
         cache_root = tmp_path / "cache"
         monkeypatch.setattr(
@@ -385,7 +378,7 @@ class TestMutmutPostRun:
 
 
 class TestMultiModelIndex:
-    """Tests for multi-model cache index and operator deduplication."""
+    """Tests for multi-model library index and operator deduplication."""
 
     def test_index_merges_across_models(self, tmp_path):
         """Two models for the same function both appear under the same source_hash key."""
@@ -526,22 +519,19 @@ class TestFullLifecycle:
 
         cache_root = tmp_path / "cache"
 
-        # Setup: mock config loading, cache entries, and storage path
         monkeypatch.setattr("mutmut_llm.config.find_pyproject", lambda start=None: None)
 
-        cache_entries = [
-            CacheEntry(
+        library_entries = [
+            LibraryEntry(
                 function_name="compute",
                 file_path="src/calc.py",
                 source_hash="h1",
-                mutations=[CachedMutation("def compute(): return 1", "negate")],
+                model="m",
+                mutations=[{"mutated_code": "def compute(): return 1"}],
             )
         ]
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
-        )
-
-        # original_save_run kept for reference; patched_save_run calls real save_run directly
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = library_entries
 
         def patched_save_run(r):
             from mutmut_llm.storage import save_run as real_save
@@ -553,6 +543,9 @@ class TestFullLifecycle:
         # 1. Configure
         mutmut_configure(config=MagicMock(spec=[]))
         assert mod._current_run is not None
+
+        # Inject mock library after configure
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
 
         # 2. Mutations created (3 builtin + 1 LLM for compute)
         mutmut_mutations_created(
@@ -619,10 +612,10 @@ class TestMutationCountConsistency:
         """Duplicate mutations across models are deduplicated in both count and operator."""
         from mutmut_llm.library import Library
         from mutmut_llm.operators import operator_llm, reset_library, set_library
+        import mutmut_llm.plugin as mod
 
         source = "def compute():\n    return 42\n"
         shared_mutation = "def compute():\n    return 0\n"
-        src_h = source_hash(source)
 
         lib = Library(base_dir=tmp_path)
         lib.add(
@@ -640,27 +633,7 @@ class TestMutationCountConsistency:
             model="claude-opus-4-6",
         )
         set_library(lib)
-
-        # _llm_mutation_count_by_function reads via list_cache_entries (legacy path, step-06 fixes)
-        entry_a = CacheEntry(
-            function_name="compute",
-            file_path="src/calc.py",
-            source_hash=src_h,
-            mutations=[CachedMutation(shared_mutation, "sonnet")],
-            model="claude-sonnet-4-6",
-            cost_usd=0.01,
-        )
-        entry_b = CacheEntry(
-            function_name="compute",
-            file_path="src/calc.py",
-            source_hash=src_h,
-            mutations=[CachedMutation(shared_mutation, "opus")],
-            model="claude-opus-4-6",
-            cost_usd=0.02,
-        )
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: [entry_a, entry_b]
-        )
+        monkeypatch.setattr(mod, "_library_instance", lib)
 
         try:
             node = cst.parse_module(source).body[0]
@@ -675,37 +648,34 @@ class TestMutationCountConsistency:
 
 
 class TestCostAggregationAcrossModels:
-    """mutmut_post_run sums costs from ALL cache entries across all models."""
+    """mutmut_post_run sums costs from ALL library entries across all models."""
 
     def test_post_run_sums_all_models_costs(self, monkeypatch, tmp_path):
         """Running with model B after model A: post_run reports A+B cost, not just B."""
         import mutmut_llm.plugin as mod
         from mutmut_llm import storage
 
-        entry_a = CacheEntry(
-            function_name="f",
-            file_path="a.py",
-            source_hash="h1",
-            mutations=[],
-            model="model-a",
-            cost_usd=0.05,
-            input_tokens=1000,
-            output_tokens=500,
-        )
-        entry_b = CacheEntry(
-            function_name="f",
-            file_path="a.py",
-            source_hash="h1",
-            mutations=[],
-            model="model-b",
-            cost_usd=0.10,
-            input_tokens=2000,
-            output_tokens=1000,
-        )
-
-        monkeypatch.setattr(
-            "mutmut_llm.plugin.list_cache_entries", lambda: [entry_a, entry_b]
-        )
+        library_entries = [
+            LibraryEntry(
+                function_name="f",
+                file_path="a.py",
+                source_hash="h1",
+                model="model-a",
+                mutations=[],
+                metadata={"cost_usd": 0.05, "input_tokens": 1000, "output_tokens": 500},
+            ),
+            LibraryEntry(
+                function_name="f",
+                file_path="a.py",
+                source_hash="h1",
+                model="model-b",
+                mutations=[],
+                metadata={"cost_usd": 0.10, "input_tokens": 2000, "output_tokens": 1000},
+            ),
+        ]
+        mock_lib = MagicMock()
+        mock_lib.list_all.return_value = library_entries
+        monkeypatch.setattr(mod, "_library_instance", mock_lib)
 
         run = new_run()
         monkeypatch.setattr(mod, "_current_run", run)

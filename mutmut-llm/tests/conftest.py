@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mutmut_llm.operators import _reset_cache_index
+from mutmut_llm.operators import reset_library
 
 
 @pytest.fixture(autouse=True)
@@ -20,14 +20,15 @@ def _reset_plugin_state(monkeypatch):
     monkeypatch.setattr(mod, "_mutmut_paths", [])
     monkeypatch.setattr(mod, "_llm_mutant_names", set())
     monkeypatch.setattr(mod, "_current_run", None)
+    monkeypatch.setattr(mod, "_library_instance", None)
 
 
 @pytest.fixture(autouse=True)
-def _clean_cache_index():
+def _clean_library():
     """Reset the in-memory cache index before each test."""
-    _reset_cache_index()
+    reset_library()
     yield
-    _reset_cache_index()
+    reset_library()
 
 
 @pytest.fixture()

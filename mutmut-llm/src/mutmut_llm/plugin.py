@@ -22,11 +22,11 @@ import libcst as cst
 from mutmut.hookspecs import hookimpl
 from mutmut.node_mutation import OPERATORS_TYPE
 
-from mutmut_llm.cache import CacheEntry, list_cache_entries
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.config import load_config
+from mutmut_llm.library import Library, LibraryEntry
 from mutmut_llm.pricing import format_cost
-from mutmut_llm.operators import _reset_cache_index, set_library
+from mutmut_llm.operators import reset_library, set_library
 from mutmut_llm.operators import operator_llm
 from mutmut_llm.reporting import format_run_summary
 from mutmut_llm.storage import MutantResult
@@ -39,6 +39,7 @@ _llm_config: LLMConfig | None = None
 _mutmut_paths: list[str] = []
 _llm_mutant_names: set[str] = set()
 _current_run: RunResult | None = None
+_library_instance: Library | None = None
 
 
 def _extract_function_name(mutant_name: str) -> str:
@@ -69,7 +70,7 @@ def _extract_function_name(mutant_name: str) -> str:
 
 
 def _llm_mutation_count_by_function() -> dict[str, int]:
-    """Count LLM mutations per function name from the cache, deduplicated.
+    """Count LLM mutations per function name from the library, deduplicated.
 
     Entries sharing the same source_hash (same function body) may come from
     different models and contain overlapping mutations. We deduplicate by
@@ -80,8 +81,11 @@ def _llm_mutation_count_by_function() -> dict[str, int]:
     bodies in different files) each get their own count. operator_llm merges
     them by hash, so each function_name gets the full deduplicated set.
     """
-    by_hash_and_func: dict[tuple[str, str], list[CacheEntry]] = defaultdict(list)
-    for entry in list_cache_entries():
+    if _library_instance is None:
+        return {}
+
+    by_hash_and_func: dict[tuple[str, str], list[LibraryEntry]] = defaultdict(list)
+    for entry in _library_instance.list_all():
         by_hash_and_func[(entry.source_hash, entry.function_name)].append(entry)
 
     # operator_llm deduplicates by source_hash across all function names,
@@ -90,7 +94,7 @@ def _llm_mutation_count_by_function() -> dict[str, int]:
     for (src_hash, _func_name), entries in by_hash_and_func.items():
         for entry in entries:
             for m in entry.mutations:
-                deduped_by_hash[src_hash].add(m.mutated_code)
+                deduped_by_hash[src_hash].add(m["mutated_code"])
 
     counts: dict[str, int] = defaultdict(int)
     func_names_by_hash: dict[str, set[str]] = defaultdict(set)
@@ -105,13 +109,13 @@ def _llm_mutation_count_by_function() -> dict[str, int]:
 
 @hookimpl
 def mutmut_configure(config: object) -> None:
-    global _llm_config, _mutmut_paths, _current_run
+    global _llm_config, _mutmut_paths, _current_run, _library_instance
     _llm_mutant_names.clear()
-    _reset_cache_index()  # resets legacy index and _library
+    reset_library()
     _llm_config = load_config()
-    from mutmut_llm.library import Library
-
-    set_library(Library())
+    lib = Library()
+    _library_instance = lib
+    set_library(lib)
     if hasattr(config, "paths_to_mutate"):
         _mutmut_paths = [str(p) for p in getattr(config, "paths_to_mutate")]  # noqa: B009
     _current_run = new_run()
@@ -179,14 +183,19 @@ def mutmut_post_run(source_file_mutation_data: Sequence) -> None:
         return
     _current_run.completed_at = datetime.now(timezone.utc).isoformat()
 
-    # Sums across ALL cached entries regardless of model. After running with
-    # model A then B, this reports A+B total. Per-model breakdown would require
-    # filtering by the active model config, which we intentionally skip here
-    # to keep the cost field a simple cumulative metric.
-    entries = list_cache_entries()
-    _current_run.total_llm_cost_usd = sum(e.cost_usd for e in entries)
-    _current_run.total_input_tokens = sum(e.input_tokens for e in entries)
-    _current_run.total_output_tokens = sum(e.output_tokens for e in entries)
+    # Sums cost across ALL library entries. Cost is stored in metadata when
+    # AnthropicGenerator persists entries; entries generated without cost
+    # metadata contribute 0 to each total.
+    entries = _library_instance.list_all() if _library_instance is not None else []
+    _current_run.total_llm_cost_usd = sum(
+        (e.metadata or {}).get("cost_usd", 0.0) for e in entries
+    )
+    _current_run.total_input_tokens = sum(
+        (e.metadata or {}).get("input_tokens", 0) for e in entries
+    )
+    _current_run.total_output_tokens = sum(
+        (e.metadata or {}).get("output_tokens", 0) for e in entries
+    )
 
     save_run(_current_run)
 
@@ -245,14 +254,15 @@ def mutmut_register_commands(cli_group: object) -> None:
 
     @cli_group.command("llm-status")  # type: ignore[union-attr]
     def llm_status() -> None:
-        """Show LLM mutation cache stats, latest run, and config."""
+        """Show LLM mutation library stats, latest run, and config."""
         config = _llm_config or load_config()
 
-        entries = list_cache_entries()
+        lib = Library()
+        entries = lib.list_all()
         total_mutations = sum(len(e.mutations) for e in entries)
-        total_cost = sum(e.cost_usd for e in entries)
+        total_cost = sum((e.metadata or {}).get("cost_usd", 0.0) for e in entries)
         click.echo(f"LLM config: enabled={config.enabled}, model={config.model}")
-        click.echo(f"Cache: {len(entries)} functions, {total_mutations} mutations")
+        click.echo(f"Library: {len(entries)} functions, {total_mutations} mutations")
         if total_cost > 0:
             avg = total_cost / len(entries) if entries else 0
             click.echo(f"Total generation cost: {format_cost(total_cost)}")
