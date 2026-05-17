@@ -3,6 +3,7 @@ import pytest
 
 from mutmut_extras.operators.assert_true import operator_assert_true
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 
@@ -57,6 +58,7 @@ def test_assert_false_mutates_to_true():
 def _isolate_plugins(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     pm = get_plugin_manager()
 
     class _TestPlugin:
@@ -67,6 +69,7 @@ def _isolate_plugins(monkeypatch):
     pm.register(_TestPlugin())
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 def test_create_mutations_assert():

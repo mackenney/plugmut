@@ -10,6 +10,7 @@ import pytest
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 from mutmut_extras.operators.assert_true import operator_assert_true
 from mutmut_extras.operators.exception_handler import operator_exception_handler
 from mutmut_extras.operators.return_none import operator_return_none
@@ -23,6 +24,7 @@ def isolate_plugins(monkeypatch):
     """Register all extras operators in an isolated plugin manager."""
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     pm = get_plugin_manager()
 
     class AllOps:
@@ -33,6 +35,7 @@ def isolate_plugins(monkeypatch):
     pm.register(AllOps())
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 def _assert_all_mutations_parse(source: str) -> list[str]:

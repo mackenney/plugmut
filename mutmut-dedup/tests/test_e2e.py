@@ -7,6 +7,7 @@ import pytest
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 
 from mutmut_dedup.bytecode import bytecode_signature
 from mutmut_dedup.normalize import normalize_mutation
@@ -42,8 +43,10 @@ def _setup_all_plugins():
 def _isolate_plugins(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 def _setup_dedup_only():
@@ -87,6 +90,7 @@ def add(a, b):
         count_before = len(mutations_no_dedup)
 
         reset_plugin_manager()
+        reset_plugin_operators()
         _setup_all_plugins()
         _, mutations_with_dedup = create_mutations(source)
         count_after = len(mutations_with_dedup)
@@ -103,6 +107,7 @@ x = 1
         count_before = len(mutations_no_dedup)
 
         reset_plugin_manager()
+        reset_plugin_operators()
         _setup_all_plugins()
         _, mutations_with_dedup = create_mutations(source)
 
@@ -220,6 +225,7 @@ def analyze(data):
         count_without = len(mutations_no_dedup)
 
         reset_plugin_manager()
+        reset_plugin_operators()
         _setup_dedup_only()
         _, mutations_with_dedup = create_mutations(source)
         count_with = len(mutations_with_dedup)

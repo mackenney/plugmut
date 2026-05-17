@@ -6,6 +6,7 @@ import pytest
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 from mutmut_extras.operators.operand_swap import (
     operator_operand_swap,
     operators as operand_swap_ops,
@@ -22,8 +23,10 @@ def _binop_node(code: str) -> cst.BinaryOperation:
 def _isolate_plugins(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 class TestOperatorOperandSwap:

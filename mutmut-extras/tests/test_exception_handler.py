@@ -6,6 +6,7 @@ import pytest
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 from mutmut_extras.operators.exception_handler import (
     operator_exception_handler,
     operators,
@@ -42,10 +43,12 @@ class _TestPlugin:
 def _isolate_plugins(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     pm = get_plugin_manager()
     pm.register(_TestPlugin())
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 class TestOperatorExceptionHandler:

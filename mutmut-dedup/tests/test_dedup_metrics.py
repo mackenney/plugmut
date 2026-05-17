@@ -15,6 +15,7 @@ import pytest
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 
 from mutmut_dedup.normalize import deduplicate, normalize_mutation
 
@@ -108,8 +109,10 @@ def _run_llm_generation(source_path: Path, cache_dir: Path):
 def _isolate(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 @pytest.fixture(scope="session")
@@ -197,6 +200,7 @@ class TestDedupMetrics:
             source = source_path.read_text()
 
             reset_plugin_manager()
+            reset_plugin_operators()
             _register_extras()
             if name in llm_caches:
                 _register_llm(llm_caches[name])
@@ -253,6 +257,7 @@ class TestDedupMetrics:
                 continue
             source = source_path.read_text()
             reset_plugin_manager()
+            reset_plugin_operators()
             _, mutations = create_mutations(source, filename=str(source_path))
             results[name] = _analyze_duplicates(mutations)
 
@@ -280,6 +285,7 @@ class TestDedupMetrics:
                 continue
             source = source_path.read_text()
             reset_plugin_manager()
+            reset_plugin_operators()
             _register_extras()
             _, mutations = create_mutations(source, filename=str(source_path))
             results[name] = _analyze_duplicates(mutations)

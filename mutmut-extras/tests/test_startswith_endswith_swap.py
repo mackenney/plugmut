@@ -6,6 +6,7 @@ import pytest
 from mutmut.file_mutation import create_mutations
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 from mutmut_extras.operators.startswith_endswith_swap import (
     operator_startswith_endswith_swap,
     operators as startswith_endswith_ops,
@@ -23,8 +24,10 @@ def _call_node(code: str) -> cst.Call:
 def _isolate_plugins(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 class TestOperatorStartswithEndswithSwap:

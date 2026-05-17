@@ -5,6 +5,7 @@ import pytest
 from mutmut.file_mutation import Mutation
 from mutmut.hookspecs import hookimpl
 from mutmut.plugin_manager import get_plugin_manager, reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 
 from mutmut_dedup.plugin import mutmut_filter_mutations
 
@@ -13,8 +14,10 @@ from mutmut_dedup.plugin import mutmut_filter_mutations
 def _isolate_plugins(monkeypatch):
     monkeypatch.setenv("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", "1")
     reset_plugin_manager()
+    reset_plugin_operators()
     yield
     reset_plugin_manager()
+    reset_plugin_operators()
 
 
 class TestHookDiscovery:

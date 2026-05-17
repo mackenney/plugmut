@@ -15,6 +15,7 @@ from mutmut.__main__ import (
     walk_source_files,
 )
 from mutmut.plugin_manager import reset_plugin_manager
+from mutmut.file_mutation import reset_plugin_operators
 
 E2E_PROJECT = (Path(__file__).parent.parent.parent / "e2e_project").resolve()
 
@@ -139,10 +140,12 @@ def test_baseline_comparison():
     os.environ["MUTMUT_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     try:
         reset_plugin_manager()
+        reset_plugin_operators()
         baseline_results = run_mutmut_on_e2e_project()
     finally:
         del os.environ["MUTMUT_DISABLE_PLUGIN_AUTOLOAD"]
         reset_plugin_manager()
+        reset_plugin_operators()
 
     plugin_results = run_mutmut_on_e2e_project()
 
