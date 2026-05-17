@@ -106,7 +106,7 @@ x = 1
         _setup_all_plugins()
         _, mutations_with_dedup = create_mutations(source)
 
-        assert len(mutations_with_dedup) >= count_before - 1
+        assert len(mutations_with_dedup) == count_before
 
 
 class TestMultipleDupsSameSite:
