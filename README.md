@@ -1,11 +1,13 @@
-# mutmut2
+# mutmut2 / plugmut
 
-UV workspace extending [mutmut](https://github.com/boxed/mutmut) with additional mutation operators via its pluggy hook system.
+UV workspace extending [mutmut](https://github.com/boxed/mutmut) with additional mutation operators via its pluggy hook system. The core `mutmut/` submodule is published as `plugmut` on PyPI.
 
 ## Structure
 
-- `mutmut/` — Git submodule tracking upstream mutmut. Patched sparingly; every patch has a conflict-resolution guide.
-- `mutmut-extras/` — Plugin package with additional mutation operators (ternary, return-none, slice-removal, exception-handler, assert-true).
+- `mutmut/` — Git submodule tracking upstream mutmut. Published as `plugmut`. Patched sparingly; every patch has a conflict-resolution guide.
+- `mutmut-extras/` — Plugin package with 19 additional mutation operators.
+- `mutmut-llm/` — Plugin package for LLM-powered mutation generation (Anthropic Claude).
+- `mutmut-dedup/` — Plugin package for structural and bytecode deduplication.
 - `conflict-resolution/` — Guides for resolving conflicts when syncing upstream changes.
 - `plans/` — Implementation plans for future work.
 
@@ -19,9 +21,11 @@ uv sync
 ## Testing
 
 ```bash
-uv run --package mutmut pytest mutmut/tests/         # core tests
+uv run --package plugmut pytest mutmut/tests/         # core tests
 uv run --package mutmut-extras pytest                 # extras unit tests
-uv run --package mutmut-extras pytest mutmut-extras/tests/e2e/  # extras e2e tests
+uv run --package mutmut-llm pytest                    # llm unit tests
+uv run --package mutmut-dedup pytest                  # dedup unit tests
+uv run --package plugmut pytest mutmut/tests/e2e/     # e2e tests
 ```
 
 ## Adding an operator
