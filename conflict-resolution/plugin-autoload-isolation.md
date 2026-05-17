@@ -28,7 +28,7 @@ def _disable_plugin_autoload():
 ## Why
 
 This workspace installs `mutmut-extras` as a sibling package. Because
-`mutmut-extras` registers a pluggy entry point under the `mutmut` group,
+`mutmut-extras` registers a pluggy entry point under the `plugmut` group,
 `get_plugin_manager()` loads it automatically via `load_setuptools_entrypoints`.
 
 The extras plugin adds mutation operators (`return None`, slice removal, etc.)
@@ -43,7 +43,7 @@ test runs, then resets the singleton plugin manager to ensure a clean state.
 
 ## How the plugin system works
 
-1. `plugin_manager.py` holds a module-level singleton `_pm`
+1. `plugin_manager.py` creates `pluggy.PluginManager("plugmut")` as a module-level singleton `_pm`
 2. `get_plugin_manager()` lazily initializes it, loading entry points unless
    `PLUGMUT_DISABLE_PLUGIN_AUTOLOAD` is set
 3. `reset_plugin_manager()` nulls `_pm` so the next call re-initializes
