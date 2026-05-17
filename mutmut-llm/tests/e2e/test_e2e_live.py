@@ -308,13 +308,13 @@ class TestOperatorReadsCache:
 class TestErrorHandling:
     """Step 7: Graceful failure modes."""
 
-    def test_live_invalid_api_key(self):
-        import anthropic
-
+    def test_live_invalid_api_key(self, tmp_path):
+        """Invalid API key should degrade gracefully: zero mutations, no exception."""
         config = load_config(
             env={**os.environ, "ANTHROPIC_API_KEY": "sk-bogus-key-12345"}
         )
-        client = anthropic.AsyncAnthropic(api_key="sk-bogus-key-12345")
+        library = Library(base_dir=tmp_path)
+        generator = AnthropicGenerator(config=config)
         target = ScopeTarget(
             file_path="sample.py",
             function_name="moving_average",
@@ -322,11 +322,14 @@ class TestErrorHandling:
             context=SAMPLE_CONTEXT,
         )
 
-        result = asyncio.run(_call_llm_and_validate_async(client, config, target, 3))
-        assert isinstance(result, GenerationResult)
-        assert result.mutations == [], (
-            f"Expected empty mutations for invalid key, got {result.mutations}"
+        stats = generator.run(
+            targets=[target],
+            budget_per_target={},
+            library=library,
+            total_budget=10,
         )
+
+        assert stats.mutations_generated == 0
 
     def test_live_empty_function(self, live_generation_result):
         """Pass a trivial function — should handle gracefully."""
