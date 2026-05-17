@@ -107,11 +107,10 @@ def _llm_mutation_count_by_function() -> dict[str, int]:
 def mutmut_configure(config: object) -> None:
     global _llm_config, _mutmut_paths, _current_run
     _llm_mutant_names.clear()
-    _reset_cache_index()  # resets both legacy index and _library
+    _reset_cache_index()  # resets legacy index and _library
     _llm_config = load_config()
     from mutmut_llm.library import Library
-
-    set_library(Library())  # base_dir=cwd; step-06 will thread proper base_dir
+    set_library(Library())
     if hasattr(config, "paths_to_mutate"):
         _mutmut_paths = [str(p) for p in getattr(config, "paths_to_mutate")]  # noqa: B009
     _current_run = new_run()
@@ -201,11 +200,45 @@ def mutmut_register_commands(cli_group: object) -> None:
     )
     def generate(budget: int, dry_run: bool, paths: tuple[str, ...]) -> None:
         """Generate LLM mutations for functions in scope."""
-        from mutmut_llm.pipeline import run_generation
+        from mutmut_llm.discovery import resolve_scope_deep
+        from mutmut_llm.generators.anthropic import AnthropicGenerator
+        from mutmut_llm.library import Library
 
         config = _llm_config or load_config()
+        if not config.enabled:
+            click.echo("LLM mutations disabled in config.")
+            return
+
         scan_paths = list(paths) if paths else (_mutmut_paths or ["src"])
-        run_generation(config=config, paths=scan_paths, budget=budget, dry_run=dry_run)
+        scope = resolve_scope_deep(
+            paths=scan_paths,
+            budget=budget,
+            max_per_function=config.max_mutations_per_function,
+            min_per_function=config.min_mutations_per_function,
+        )
+
+        if not scope.targets:
+            click.echo("No functions found in scope.")
+            return
+
+        click.echo(f"Found {len(scope.targets)} functions in scope.")
+
+        if dry_run:
+            click.echo("\nDry run \u2014 functions that would be mutated:")
+            for t in scope.targets:
+                n = scope.budget_per_target.get(f"{t.file_path}::{t.function_name}", 0)
+                click.echo(f"  {t.file_path}::{t.function_name} (budget: {n})")
+            return
+
+        library = Library()
+        generator = AnthropicGenerator(config=config)
+        stats = generator.run(
+            targets=scope.targets,
+            budget_per_target=scope.budget_per_target,
+            library=library,
+            total_budget=budget,
+        )
+        click.echo(f"\nDone. {stats.api_calls} API calls, {stats.mutations_generated} mutations generated.")
 
     @cli_group.command("llm-status")  # type: ignore[union-attr]
     def llm_status() -> None:
