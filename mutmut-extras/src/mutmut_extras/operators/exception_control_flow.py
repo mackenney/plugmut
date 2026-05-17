@@ -25,7 +25,8 @@ def operator_exception_control_flow(node: cst.ExceptHandler) -> Iterable[cst.Exc
 
     Only operates on handlers whose body is a single `pass` statement.
     Generates break/continue (valid in loops) and return (valid in functions).
-    Invalid variants (break outside loop) are filtered by mutmut's syntax validation.
+    Invalid variants (break/continue outside a loop) are generated and killed at
+    test time when compile() rejects the mutated module.
     """
     if not _body_is_pass(node.body):
         return
