@@ -35,6 +35,8 @@ These are the hook *definitions* and *call sites* — they extend mutmut's plugi
 ### hookspecs.py
 Upstream only has `mutmut_register_operators`. Our patch adds 6 more specs to `MutmutHookSpec`. If upstream adds their own hooks, merge both sets — names shouldn't conflict since these follow the `mutmut_` prefix convention.
 
+We also added a `-> OPERATORS_TYPE` return type annotation to the existing `mutmut_register_operators` hookspec, importing `OPERATORS_TYPE` from `node_mutation.py`. If upstream adds their own return annotation that conflicts, keep whichever is more specific.
+
 ### file_mutation.py
 Two changes:
 1. `create_mutations()` signature gains `filename=""` parameter and calls `mutmut_filter_mutations` after the visitor.

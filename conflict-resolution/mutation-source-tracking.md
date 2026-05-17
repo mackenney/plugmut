@@ -18,7 +18,14 @@ Similarly, the `.meta` file format is owned by `SourceFileMutationData` in `__ma
 
 2. **`MutationVisitor._create_mutations()` (line ~210):** Reads `__mutmut_source__` attribute from operator callables via `getattr(operator, "__mutmut_source__", "builtin")`. Passes source to `Mutation` constructor.
 
-3. **`mutate_file_contents()` (line ~87):** Return type changed from `tuple[str, Sequence[str]]` to `tuple[str, Sequence[str], dict[str, str]]`. Third element maps mutant name to source string. Also passes `source_by_name` to `mutmut_mutations_created` hook instead of empty strings.
+3. **`mutate_file_contents()` (line ~87):** Return type is now `MutationResult` — a `NamedTuple` with fields `mutated_code`, `mutant_names`, and `source_by_name`. The NamedTuple allows callers to unpack two or three fields without breaking the old 2-field positional pattern. Also passes `source_by_name` to `mutmut_mutations_created` hook instead of empty strings.
+
+   ```python
+   class MutationResult(NamedTuple):
+       mutated_code: str
+       mutant_names: Sequence[str]
+       source_by_name: dict[str, str]
+   ```
 
 4. **`combine_mutations_to_source()` (line ~280):** Return type changed from `tuple[str, Sequence[str]]` to `tuple[str, Sequence[str], dict[str, str]]`. Collects source-by-name from `function_trampoline_arrangement`.
 
@@ -45,7 +52,9 @@ Add the `source: str = "builtin"` field after whatever upstream changes. The def
 Re-add the `source = getattr(operator, "__mutmut_source__", "builtin")` line and pass `source=source` to the `Mutation` constructor.
 
 ### If upstream changes return types of `mutate_file_contents`, `combine_mutations_to_source`, or `function_trampoline_arrangement`
-These functions now return an additional `dict[str, str]` element. If upstream changes their return types, extend the new type to include the source mapping as the last element.
+`mutate_file_contents` returns `MutationResult` (NamedTuple). If upstream changes its return type, convert `MutationResult` to match the new shape, keeping `source_by_name` as the last field. The NamedTuple class lives in `file_mutation.py` alongside `Mutation`.
+
+`combine_mutations_to_source` and `function_trampoline_arrangement` return plain 3-tuples — re-add `source_by_name` as the third element if upstream drops it.
 
 ### If upstream changes `.meta` format or `SourceFileMutationData`
 Ensure `source_by_key` is included in save/load. The `meta.pop("source_by_key", {})` pattern in `load()` handles backward compatibility with old files.

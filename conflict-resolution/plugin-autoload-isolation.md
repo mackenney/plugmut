@@ -6,16 +6,23 @@
 
 ```python
 import os
+
 import pytest
+
+from mutmut.file_mutation import reset_plugin_operators
 from mutmut.plugin_manager import reset_plugin_manager
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _disable_plugin_autoload():
+    """Prevent third-party plugins from loading during core tests."""
     os.environ["MUTMUT_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     reset_plugin_manager()
+    reset_plugin_operators()
     yield
     os.environ.pop("MUTMUT_DISABLE_PLUGIN_AUTOLOAD", None)
     reset_plugin_manager()
+    reset_plugin_operators()
 ```
 
 ## Why
@@ -39,9 +46,13 @@ test runs, then resets the singleton plugin manager to ensure a clean state.
 1. `plugin_manager.py` holds a module-level singleton `_pm`
 2. `get_plugin_manager()` lazily initializes it, loading entry points unless
    `MUTMUT_DISABLE_PLUGIN_AUTOLOAD` is set
-3. `reset_plugin_manager()` nulls the singleton so the next call re-initializes
-4. Mutation operators from plugins are collected in `file_mutation.py` via
-   `get_plugin_manager().hook.mutmut_register_operators()`
+3. `reset_plugin_manager()` nulls `_pm` so the next call re-initializes
+4. `file_mutation.py` holds a separate module-level cache `_plugin_operators`
+   populated by `get_plugin_operators()` on first use
+5. `reset_plugin_operators()` nulls `_plugin_operators` — must be called alongside
+   `reset_plugin_manager()` to fully clear plugin state between tests
+6. Mutation operators enter the cache via `get_plugin_operators()`,
+   which calls `get_plugin_manager().hook.mutmut_register_operators()` once
 
 ## Conflict scenario
 
@@ -53,6 +64,8 @@ directly. Resolution:
 3. If no, merge our fixture into their conftest
 4. If upstream changes the env var name or plugin loading mechanism, update the
    fixture to match
+5. When merging, ensure both `reset_plugin_manager()` and `reset_plugin_operators()`
+   are called — resetting only the plugin manager leaves stale cached operators
 
 ## Verification
 
