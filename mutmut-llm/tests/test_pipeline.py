@@ -9,7 +9,7 @@ import pytest
 from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.pipeline import GenerationResult, _call_llm_and_validate, run_generation
-from mutmut_llm.scope import ScopeTarget
+from mutmut_llm.discovery import ScopeTarget
 from tests.conftest import make_mock_response as _make_mock_response
 
 
@@ -1102,7 +1102,7 @@ class TestComputeBackoff:
 
 class TestCallLlmAsync:
     def _make_target(self):
-        from mutmut_llm.scope import ScopeTarget
+        from mutmut_llm.discovery import ScopeTarget
         return ScopeTarget(
             file_path="f.py",
             function_name="f",
@@ -1259,7 +1259,7 @@ class TestCallLlmAsync:
 
 class TestGenerateMutationsAsync:
     def _make_targets(self, n=2, base="f"):
-        from mutmut_llm.scope import ScopeTarget
+        from mutmut_llm.discovery import ScopeTarget
         return [
             ScopeTarget(
                 file_path=f"{base}{i}.py",
@@ -1369,7 +1369,7 @@ class TestGenerateMutationsAsync:
         from unittest.mock import patch, AsyncMock
         from mutmut_llm.pipeline import _generate_mutations_async
         from mutmut_llm.config import LLMConfig
-        from mutmut_llm.scope import ScopeTarget
+        from mutmut_llm.discovery import ScopeTarget
         from tests.conftest import make_mock_response
 
         # Create targets in unsorted order

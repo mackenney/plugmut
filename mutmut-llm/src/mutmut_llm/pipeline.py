@@ -33,7 +33,7 @@ from mutmut_llm.prompts import (
     build_user_prompt,
     parse_llm_response,
 )
-from mutmut_llm.scope import ScopeTarget, resolve_scope_deep
+from mutmut_llm.discovery import GenerationTarget, ScopeResult, resolve_scope_deep
 from mutmut_llm.validation import validate_mutation
 
 
@@ -188,7 +188,7 @@ def run_generation(
 
 def _generate_mutations(
     config: LLMConfig,
-    targets: list[ScopeTarget],
+    targets: list[GenerationTarget],
     budget_per_target: dict[str, int],
     total_budget: int,
     base_dir: Path | None,
@@ -202,7 +202,7 @@ def _generate_mutations(
 def _call_llm_and_validate(
     client: object,
     config: LLMConfig,
-    target: ScopeTarget,
+    target: GenerationTarget,
     max_mutations: int,
 ) -> GenerationResult:
     """Call LLM API, parse response, validate each mutation."""
@@ -276,7 +276,7 @@ def _call_llm_and_validate(
 async def _call_llm_and_validate_async(
     client,  # anthropic.AsyncAnthropic
     config: LLMConfig,
-    target: ScopeTarget,
+    target: GenerationTarget,
     max_mutations: int,
     system_prompt: str | None = None,
 ) -> GenerationResult:
@@ -350,7 +350,7 @@ def _compute_backoff(attempt: int, base: float, cap: float = 30.0) -> float:
 async def _call_llm_async(
     client,  # anthropic.AsyncAnthropic
     config: LLMConfig,
-    target: ScopeTarget,
+    target: GenerationTarget,
     max_mutations: int,
     semaphore: TrackedSemaphore,
     cancel_event: asyncio.Event,
@@ -415,7 +415,7 @@ async def _call_llm_async(
 
 async def _generate_mutations_async(
     config: LLMConfig,
-    targets: list[ScopeTarget],
+    targets: list[GenerationTarget],
     budget_per_target: dict[str, int],
     total_budget: int,
     base_dir: "Path | None",
@@ -433,7 +433,7 @@ async def _generate_mutations_async(
     cancel_event = asyncio.Event()
 
     sorted_targets = sorted(targets, key=lambda t: t.file_path)
-    work_items: list[tuple[ScopeTarget, str, int]] = []
+    work_items: list[tuple[GenerationTarget, str, int]] = []
 
     for target in sorted_targets:
         if len(work_items) >= total_budget:
@@ -462,7 +462,7 @@ async def _generate_mutations_async(
     concurrency = _compute_concurrency(len(work_items), config)
     semaphore = TrackedSemaphore(concurrency)
 
-    tasks: list[tuple[ScopeTarget, str, asyncio.Task]] = []
+    tasks: list[tuple[GenerationTarget, str, asyncio.Task]] = []
     for target, src_hash, max_mut in work_items:
         coro = _call_llm_async(client, config, target, max_mut, semaphore, cancel_event, system_prompt)
         tasks.append((target, src_hash, asyncio.create_task(coro)))

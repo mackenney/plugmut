@@ -14,7 +14,7 @@ import libcst as cst
 
 
 @dataclass
-class ScopeTarget:
+class GenerationTarget:
     file_path: str
     function_name: str
     source: str
@@ -23,7 +23,7 @@ class ScopeTarget:
 
 @dataclass
 class ScopeResult:
-    targets: list[ScopeTarget]
+    targets: list[GenerationTarget]
     mode: str
     budget: int
     budget_per_target: dict[str, int] = field(default_factory=dict)
@@ -36,7 +36,7 @@ def resolve_scope_deep(
     min_per_function: int = 2,
 ) -> ScopeResult:
     """Deep mode: extract all functions from *paths* (files or directories)."""
-    targets: list[ScopeTarget] = []
+    targets: list[GenerationTarget] = []
 
     for source_file in _discover_python_files(paths):
         targets.extend(_extract_functions(source_file))
@@ -59,7 +59,7 @@ def _discover_python_files(paths: list[str]) -> list[str]:
     return result
 
 
-def _extract_functions(file_path: str) -> list[ScopeTarget]:
+def _extract_functions(file_path: str) -> list[GenerationTarget]:
     """Extract all functions from a Python file."""
     try:
         source = Path(file_path).read_text()
@@ -67,14 +67,14 @@ def _extract_functions(file_path: str) -> list[ScopeTarget]:
     except Exception:
         return []
 
-    targets: list[ScopeTarget] = []
+    targets: list[GenerationTarget] = []
 
     for stmt in module.body:
         if isinstance(stmt, cst.FunctionDef):
             func_source = module.code_for_node(stmt)
             module_context = _build_module_context(module, func_source)
             targets.append(
-                ScopeTarget(
+                GenerationTarget(
                     file_path=file_path,
                     function_name=stmt.name.value,
                     source=func_source,
@@ -94,7 +94,7 @@ def _extract_functions(file_path: str) -> list[ScopeTarget]:
                     )
                     qualified_name = f"{stmt.name.value}.{class_stmt.name.value}"
                     targets.append(
-                        ScopeTarget(
+                        GenerationTarget(
                             file_path=file_path,
                             function_name=qualified_name,
                             source=func_source,
@@ -302,7 +302,7 @@ def compute_mutation_budget(
 
 
 def _allocate_budget(
-    targets: list[ScopeTarget],
+    targets: list[GenerationTarget],
     total_budget: int,
     max_per_function: int,
     min_per_function: int = 2,
@@ -349,3 +349,7 @@ def _allocate_budget(
         budget_left -= n
 
     return alloc
+
+
+# Backward compatibility alias (to be removed in step-08)
+ScopeTarget = GenerationTarget

@@ -1,4 +1,4 @@
-"""Tests for mutmut_llm.scope."""
+"""Tests for mutmut_llm.discovery."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import textwrap
 import libcst as cst
 import pytest
 
-from mutmut_llm.scope import (
+from mutmut_llm.discovery import (
     ScopeResult,
-    ScopeTarget,
+    GenerationTarget,
     _allocate_budget,
     _branch_count,
     _build_class_context,
@@ -613,13 +613,13 @@ class TestAllocateBudget:
         assert _allocate_budget([], 10, 5) == {}
 
     def test_zero_budget(self):
-        targets = [ScopeTarget(file_path="f.py", function_name="f", source="")]
+        targets = [GenerationTarget(file_path="f.py", function_name="f", source="")]
         assert _allocate_budget(targets, 0, 5) == {}
 
     def test_simple_functions_get_min_budget(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="f.py", function_name="b", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="b", source=SIMPLE_FUNC),
         ]
         alloc = _allocate_budget(targets, 20, 10)
         assert alloc["f.py::a"] == 2
@@ -627,24 +627,24 @@ class TestAllocateBudget:
 
     def test_complex_function_gets_more_than_simple(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
+            GenerationTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
         ]
         alloc = _allocate_budget(targets, 50, 10)
         assert alloc["f.py::complex"] > alloc["f.py::simple"]
 
     def test_capped_at_max_per_function(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=COMPLEX_FUNC)
+            GenerationTarget(file_path="f.py", function_name="a", source=COMPLEX_FUNC)
         ]
         alloc = _allocate_budget(targets, 100, 3)
         assert alloc["f.py::a"] == 3
 
     def test_budget_less_than_targets(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="f.py", function_name="b", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="f.py", function_name="c", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="b", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="c", source=SIMPLE_FUNC),
         ]
         alloc = _allocate_budget(targets, 1, 5)
         assert sum(alloc.values()) <= 1
@@ -652,17 +652,17 @@ class TestAllocateBudget:
     def test_total_never_exceeds_budget(self):
         """3 targets, budget=2 -- must not allocate more than 2 total."""
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="f.py", function_name="b", source=MEDIUM_FUNC),
-            ScopeTarget(file_path="f.py", function_name="c", source=COMPLEX_FUNC),
+            GenerationTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="b", source=MEDIUM_FUNC),
+            GenerationTarget(file_path="f.py", function_name="c", source=COMPLEX_FUNC),
         ]
         alloc = _allocate_budget(targets, 5, 10)
         assert sum(alloc.values()) <= 5
 
     def test_file_qualified_keys_no_collision(self):
         targets = [
-            ScopeTarget(file_path="a.py", function_name="helper", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="b.py", function_name="helper", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="a.py", function_name="helper", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="b.py", function_name="helper", source=SIMPLE_FUNC),
         ]
         alloc = _allocate_budget(targets, 10, 5)
         assert len(alloc) == 2
@@ -670,21 +670,21 @@ class TestAllocateBudget:
         assert "b.py::helper" in alloc
 
     def test_min_per_function_parameter(self):
-        targets = [ScopeTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC)]
+        targets = [GenerationTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC)]
         alloc = _allocate_budget(targets, 100, 10, min_per_function=5)
         assert alloc["f.py::a"] >= 5
 
     def test_scaling_preserves_relative_order(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
-            ScopeTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
+            GenerationTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
+            GenerationTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
         ]
         alloc = _allocate_budget(targets, 5, 10)
         assert alloc["f.py::complex"] >= alloc["f.py::simple"]
 
     def test_large_budget_no_scaling(self):
         targets = [
-            ScopeTarget(file_path="f.py", function_name="a", source=MEDIUM_FUNC),
+            GenerationTarget(file_path="f.py", function_name="a", source=MEDIUM_FUNC),
         ]
         raw = compute_mutation_budget(MEDIUM_FUNC, min_budget=2, max_budget=10)
         alloc = _allocate_budget(targets, 100, 10)
@@ -718,17 +718,17 @@ class TestSortStability:
     def test_same_file_preserves_order(self):
         """Multiple functions in the same file should maintain original order after sort."""
         targets = [
-            ScopeTarget(
+            GenerationTarget(
                 file_path="same.py",
                 function_name="z_func",
                 source="def z_func(): pass\n",
             ),
-            ScopeTarget(
+            GenerationTarget(
                 file_path="same.py",
                 function_name="a_func",
                 source="def a_func(): pass\n",
             ),
-            ScopeTarget(
+            GenerationTarget(
                 file_path="same.py",
                 function_name="m_func",
                 source="def m_func(): pass\n",
@@ -744,16 +744,16 @@ class TestSortStability:
     def test_sort_groups_by_file_for_caching(self):
         """Functions from same file should be grouped together for cache locality."""
         targets = [
-            ScopeTarget(
+            GenerationTarget(
                 file_path="b.py", function_name="b1", source="def b1(): pass\n"
             ),
-            ScopeTarget(
+            GenerationTarget(
                 file_path="a.py", function_name="a1", source="def a1(): pass\n"
             ),
-            ScopeTarget(
+            GenerationTarget(
                 file_path="b.py", function_name="b2", source="def b2(): pass\n"
             ),
-            ScopeTarget(
+            GenerationTarget(
                 file_path="a.py", function_name="a2", source="def a2(): pass\n"
             ),
         ]

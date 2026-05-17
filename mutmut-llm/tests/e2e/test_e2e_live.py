@@ -20,7 +20,7 @@ from mutmut_llm.cache import list_cache_entries, source_hash
 from mutmut_llm.config import load_config
 from mutmut_llm.operators import _reset_cache_index
 from mutmut_llm.pipeline import GenerationResult, _call_llm_and_validate, run_generation
-from mutmut_llm.scope import ScopeTarget
+from mutmut_llm.discovery import ScopeTarget
 from mutmut_llm.validation import validate_imports
 
 LIVE_ENABLED = os.environ.get("MUTMUT_LLM_E2E_LIVE") == "1"
