@@ -183,6 +183,15 @@ def mutmut_post_run(source_file_mutation_data: Sequence) -> None:
         return
     _current_run.completed_at = datetime.now(timezone.utc).isoformat()
 
+    llm_mutant_names_in_run: set[str] = set()
+    for sfmd in source_file_mutation_data:
+        for mutant_name, source_tag in sfmd.source_by_key.items():
+            if source_tag == "mutmut-llm":
+                llm_mutant_names_in_run.add(mutant_name)
+
+    for result in _current_run.results:
+        result.is_llm = result.mutant_name in llm_mutant_names_in_run
+
     # Sums cost across ALL library entries. Cost is stored in metadata when
     # AnthropicGenerator persists entries; entries generated without cost
     # metadata contribute 0 to each total.

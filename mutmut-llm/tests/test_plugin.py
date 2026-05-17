@@ -386,6 +386,102 @@ class TestMutmutPostRun:
         monkeypatch.setattr(mod, "_current_run", None)
         mutmut_post_run(source_file_mutation_data=[])
 
+    def test_identifies_llm_mutants_via_source_by_key(self, monkeypatch, tmp_path):
+        """post_run sets is_llm=True for mutants tagged 'mutmut-llm' in source_by_key."""
+        import mutmut_llm.plugin as mod
+        from mutmut_llm import storage
+
+        run = new_run()
+        monkeypatch.setattr(mod, "_current_run", run)
+        monkeypatch.setattr(mod, "_library_instance", None)
+        monkeypatch.setattr(mod, "_llm_mutant_names", set())
+
+        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
+        mutmut_post_test(mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.2)
+        mutmut_post_test(mutant_name="x_foo__mutmut_3", exit_code=1, status="killed", duration=0.3)
+
+        sfmd = MagicMock()
+        sfmd.source_by_key = {
+            "x_foo__mutmut_1": "builtin",
+            "x_foo__mutmut_2": "builtin",
+            "x_foo__mutmut_3": "mutmut-llm",
+        }
+
+        cache_root = tmp_path / "cache"
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.save_run",
+            lambda r: storage.save_run(r, cache_root=cache_root),
+        )
+
+        mutmut_post_run(source_file_mutation_data=[sfmd])
+
+        assert run.results[0].is_llm is False
+        assert run.results[1].is_llm is False
+        assert run.results[2].is_llm is True
+
+    def test_is_llm_overrides_preliminary_values(self, monkeypatch, tmp_path):
+        """post_run corrects is_llm flags even when post_test set them from the heuristic."""
+        import mutmut_llm.plugin as mod
+        from mutmut_llm import storage
+
+        run = new_run()
+        monkeypatch.setattr(mod, "_current_run", run)
+        monkeypatch.setattr(mod, "_library_instance", None)
+        # Heuristic says mutmut_1 is LLM and mutmut_2 is builtin — source_by_key says the opposite
+        monkeypatch.setattr(mod, "_llm_mutant_names", {"x_foo__mutmut_1"})
+
+        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
+        mutmut_post_test(mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.2)
+
+        assert run.results[0].is_llm is True   # heuristic (wrong)
+        assert run.results[1].is_llm is False  # heuristic (wrong)
+
+        sfmd = MagicMock()
+        sfmd.source_by_key = {
+            "x_foo__mutmut_1": "builtin",
+            "x_foo__mutmut_2": "mutmut-llm",
+        }
+
+        cache_root = tmp_path / "cache"
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.save_run",
+            lambda r: storage.save_run(r, cache_root=cache_root),
+        )
+
+        mutmut_post_run(source_file_mutation_data=[sfmd])
+
+        assert run.results[0].is_llm is False  # corrected by source_by_key
+        assert run.results[1].is_llm is True   # corrected by source_by_key
+
+    def test_multiple_sfmd_objects_combined(self, monkeypatch, tmp_path):
+        """LLM mutants from multiple SourceFileMutationData objects are all collected."""
+        import mutmut_llm.plugin as mod
+        from mutmut_llm import storage
+
+        run = new_run()
+        monkeypatch.setattr(mod, "_current_run", run)
+        monkeypatch.setattr(mod, "_library_instance", None)
+        monkeypatch.setattr(mod, "_llm_mutant_names", set())
+
+        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
+        mutmut_post_test(mutant_name="x_bar__mutmut_1", exit_code=1, status="killed", duration=0.2)
+
+        sfmd_a = MagicMock()
+        sfmd_a.source_by_key = {"x_foo__mutmut_1": "mutmut-llm"}
+        sfmd_b = MagicMock()
+        sfmd_b.source_by_key = {"x_bar__mutmut_1": "builtin"}
+
+        cache_root = tmp_path / "cache"
+        monkeypatch.setattr(
+            "mutmut_llm.plugin.save_run",
+            lambda r: storage.save_run(r, cache_root=cache_root),
+        )
+
+        mutmut_post_run(source_file_mutation_data=[sfmd_a, sfmd_b])
+
+        assert run.results[0].is_llm is True   # from sfmd_a
+        assert run.results[1].is_llm is False  # from sfmd_b
+
 
 class TestMultiModelIndex:
     """Tests for multi-model library index and operator deduplication."""
@@ -594,8 +690,15 @@ class TestFullLifecycle:
 
         assert len(mod._current_run.results) == 4
 
-        # 4. Post-run
-        mutmut_post_run(source_file_mutation_data=[])
+        # 4. Post-run: pass source_by_key identifying which mutant is LLM-generated
+        sfmd = MagicMock()
+        sfmd.source_by_key = {
+            "x_compute__mutmut_1": "builtin",
+            "x_compute__mutmut_2": "builtin",
+            "x_compute__mutmut_3": "builtin",
+            "x_compute__mutmut_4": "mutmut-llm",
+        }
+        mutmut_post_run(source_file_mutation_data=[sfmd])
         assert mod._current_run.completed_at is not None
 
         # 5. Verify saved
