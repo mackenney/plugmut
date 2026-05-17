@@ -1,4 +1,5 @@
 """Anthropic Claude generator for mutation generation."""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,12 @@ from mutmut_llm.discovery import GenerationTarget
 from mutmut_llm.generators.base import GenerationStats
 from mutmut_llm.library import source_hash as compute_source_hash
 from mutmut_llm.pricing import calculate_cost, format_cost
-from mutmut_llm.prompts import build_system_prompt, build_system_with_context, build_user_prompt, parse_llm_response
+from mutmut_llm.prompts import (
+    build_system_prompt,
+    build_system_with_context,
+    build_user_prompt,
+    parse_llm_response,
+)
 from mutmut_llm.validation import validate_mutation
 
 if TYPE_CHECKING:
@@ -379,7 +385,9 @@ class AnthropicGenerator:
             try:
                 for target, task in tasks:
                     pbar.set_postfix(
-                        in_flight=semaphore.in_flight, failed=failed, cost=stats.cost_usd
+                        in_flight=semaphore.in_flight,
+                        failed=failed,
+                        cost=stats.cost_usd,
                     )
 
                     if cancel_event.is_set():
@@ -409,7 +417,9 @@ class AnthropicGenerator:
                         failed += 1
                         pbar.update(1)
                         pbar.set_postfix(
-                            in_flight=semaphore.in_flight, failed=failed, cost=stats.cost_usd
+                            in_flight=semaphore.in_flight,
+                            failed=failed,
+                            cost=stats.cost_usd,
                         )
                         continue
 
@@ -436,7 +446,9 @@ class AnthropicGenerator:
 
                     pbar.update(1)
                     pbar.set_postfix(
-                        in_flight=semaphore.in_flight, failed=failed, cost=stats.cost_usd
+                        in_flight=semaphore.in_flight,
+                        failed=failed,
+                        cost=stats.cost_usd,
                     )
 
             except KeyboardInterrupt:

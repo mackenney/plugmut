@@ -27,6 +27,7 @@ def reset_library() -> None:
     global _library
     _library = None
 
+
 def operator_llm(node: cst.FunctionDef) -> Iterable[cst.FunctionDef]:
     """Yield LLM-generated mutations for a function.
 

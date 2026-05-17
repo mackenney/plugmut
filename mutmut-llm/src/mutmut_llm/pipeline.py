@@ -35,6 +35,7 @@ __all__ = [
     "run_generation",
 ]
 
+
 def run_generation(
     config,
     paths: list[str],

@@ -67,6 +67,7 @@ def make_async_mock_client(responses=None):
                    Can contain exceptions to simulate failures.
     """
     from unittest.mock import AsyncMock
+
     client = AsyncMock()
     if responses:
         client.messages.create = AsyncMock(side_effect=responses)

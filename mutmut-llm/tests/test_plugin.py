@@ -175,7 +175,9 @@ class TestMutmutMutationsCreated:
         """When library has 2 LLM mutations for 'foo', the last 2 mutants for that function are LLM."""
         import mutmut_llm.plugin as mod
 
-        entry = self._make_library_entry("foo", "src/mod.py", "abc123", ["code1", "code2"])
+        entry = self._make_library_entry(
+            "foo", "src/mod.py", "abc123", ["code1", "code2"]
+        )
         mock_lib = MagicMock()
         mock_lib.list_all.return_value = [entry]
         monkeypatch.setattr(mod, "_library_instance", mock_lib)
@@ -252,7 +254,9 @@ class TestMutmutMutationsCreated:
         """Library stores 'MyClass.method'; mutant names use ǁ separator. They must match."""
         import mutmut_llm.plugin as mod
 
-        entry = self._make_library_entry("MyClass.method", "src/mod.py", "abc", ["code1"])
+        entry = self._make_library_entry(
+            "MyClass.method", "src/mod.py", "abc", ["code1"]
+        )
         mock_lib = MagicMock()
         mock_lib.list_all.return_value = [entry]
         monkeypatch.setattr(mod, "_library_instance", mock_lib)
@@ -315,7 +319,9 @@ class TestMutmutPostRun:
 
         cache_root = tmp_path / "cache"
         monkeypatch.setattr(
-            storage, "_runs_dir", lambda cache_root=None: cache_root / "runs"  # type: ignore[operator]
+            storage,
+            "_runs_dir",
+            lambda cache_root=None: cache_root / "runs",  # type: ignore[operator]
         )
         monkeypatch.setattr(
             "mutmut_llm.plugin.save_run",
@@ -351,7 +357,11 @@ class TestMutmutPostRun:
                 source_hash="h2",
                 model="m",
                 mutations=[],
-                metadata={"cost_usd": 0.02, "input_tokens": 2000, "output_tokens": 1000},
+                metadata={
+                    "cost_usd": 0.02,
+                    "input_tokens": 2000,
+                    "output_tokens": 1000,
+                },
             ),
         ]
         mock_lib = MagicMock()
@@ -382,7 +392,6 @@ class TestMultiModelIndex:
 
     def test_index_merges_across_models(self, tmp_path):
         """Two models for the same function both appear under the same source_hash key."""
-        from mutmut_llm.library import Library
         from mutmut_llm.operators import reset_library, set_library
 
         source = "def foo(): return 1"
@@ -412,7 +421,6 @@ class TestMultiModelIndex:
 
     def test_index_handles_identical_functions_different_files(self, tmp_path):
         """Identical functions in different files both appear under the same source_hash key."""
-        from mutmut_llm.library import Library
         from mutmut_llm.operators import reset_library, set_library
 
         source = "def get_name(self):\n    return self.name"
@@ -442,7 +450,6 @@ class TestMultiModelIndex:
 
     def test_operator_deduplicates_across_models(self, tmp_path):
         """operator_llm yields each unique mutation exactly once across models."""
-        from mutmut_llm.library import Library
         from mutmut_llm.operators import operator_llm, reset_library, set_library
 
         source = "def foo():\n    return 1\n"
@@ -482,7 +489,6 @@ class TestMultiModelIndex:
 
     def test_operator_yields_from_multiple_files_same_hash(self, tmp_path):
         """Identical functions in different files both contribute mutations."""
-        from mutmut_llm.library import Library
         from mutmut_llm.operators import operator_llm, reset_library, set_library
 
         source = "def get_name(self):\n    return self.name\n"
@@ -610,7 +616,6 @@ class TestMutationCountConsistency:
 
     def test_count_matches_actual_yielded_mutations(self, monkeypatch, tmp_path):
         """Duplicate mutations across models are deduplicated in both count and operator."""
-        from mutmut_llm.library import Library
         from mutmut_llm.operators import operator_llm, reset_library, set_library
         import mutmut_llm.plugin as mod
 
@@ -670,7 +675,11 @@ class TestCostAggregationAcrossModels:
                 source_hash="h1",
                 model="model-b",
                 mutations=[],
-                metadata={"cost_usd": 0.10, "input_tokens": 2000, "output_tokens": 1000},
+                metadata={
+                    "cost_usd": 0.10,
+                    "input_tokens": 2000,
+                    "output_tokens": 1000,
+                },
             ),
         ]
         mock_lib = MagicMock()

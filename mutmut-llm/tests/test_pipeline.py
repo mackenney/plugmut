@@ -7,15 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mutmut_llm.config import LLMConfig
-from mutmut_llm.pipeline import GenerationResult
 from mutmut_llm.discovery import GenerationTarget as ScopeTarget
-from tests.conftest import make_mock_response as _make_mock_response
 
 
 class TestErrorClassifier:
     def _make_api_exc(self, cls, message="error", status_code=400):
         """Construct an Anthropic HTTP exception."""
-        import anthropic
 
         response = MagicMock()
         response.status_code = status_code
@@ -43,7 +40,9 @@ class TestErrorClassifier:
 
         from mutmut_llm.pipeline import ErrorAction, classify_error
 
-        exc = self._make_api_exc(anthropic.RateLimitError, message="rate limit hit", status_code=429)
+        exc = self._make_api_exc(
+            anthropic.RateLimitError, message="rate limit hit", status_code=429
+        )
         assert classify_error(exc) == ErrorAction.RETRY
 
     def test_rate_limit_with_spending_limit_stops(self):
@@ -51,7 +50,9 @@ class TestErrorClassifier:
 
         from mutmut_llm.pipeline import ErrorAction, classify_error
 
-        exc = self._make_api_exc(anthropic.RateLimitError, message="spending limit exceeded", status_code=429)
+        exc = self._make_api_exc(
+            anthropic.RateLimitError, message="spending limit exceeded", status_code=429
+        )
         assert classify_error(exc) == ErrorAction.STOP
 
     def test_rate_limit_with_credit_stops(self):
@@ -59,7 +60,9 @@ class TestErrorClassifier:
 
         from mutmut_llm.pipeline import ErrorAction, classify_error
 
-        exc = self._make_api_exc(anthropic.RateLimitError, message="insufficient credit", status_code=429)
+        exc = self._make_api_exc(
+            anthropic.RateLimitError, message="insufficient credit", status_code=429
+        )
         assert classify_error(exc) == ErrorAction.STOP
 
     def test_internal_server_error_retries(self):
@@ -112,11 +115,13 @@ class TestErrorClassifier:
 class TestTrackedSemaphore:
     async def test_in_flight_starts_at_zero(self):
         from mutmut_llm.pipeline import TrackedSemaphore
+
         sem = TrackedSemaphore(5)
         assert sem.in_flight == 0
 
     async def test_in_flight_tracking(self):
         from mutmut_llm.pipeline import TrackedSemaphore
+
         sem = TrackedSemaphore(2)
         assert sem.in_flight == 0
 
@@ -130,6 +135,7 @@ class TestTrackedSemaphore:
     async def test_max_concurrency_enforced(self):
         import asyncio
         from mutmut_llm.pipeline import TrackedSemaphore
+
         sem = TrackedSemaphore(2)
         acquired = []
         released = asyncio.Event()
@@ -150,6 +156,7 @@ class TestTrackedSemaphore:
     async def test_in_flight_accurate_under_concurrent_access(self):
         import asyncio
         from mutmut_llm.pipeline import TrackedSemaphore
+
         sem = TrackedSemaphore(5)
         max_seen = 0
 
@@ -209,62 +216,73 @@ class TestSigintHandler:
 class TestComputeConcurrency:
     def _cfg(self, min_c=5, max_c=20):
         from mutmut_llm.config import LLMConfig
+
         return LLMConfig(min_concurrency=min_c, max_concurrency=max_c)
 
     def test_zero_targets_returns_min(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         assert _compute_concurrency(0, self._cfg()) == 5
 
     def test_one_target_returns_min(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         assert _compute_concurrency(1, self._cfg()) == 5
 
     def test_six_targets_clamped_to_min(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # 6//3=2 < 5
         assert _compute_concurrency(6, self._cfg()) == 5
 
     def test_fifteen_targets_equals_min(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # 15//3=5 == min
         assert _compute_concurrency(15, self._cfg()) == 5
 
     def test_thirty_targets_returns_ten(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # 30//3=10
         assert _compute_concurrency(30, self._cfg()) == 10
 
     def test_sixty_targets_equals_max(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # 60//3=20 == max
         assert _compute_concurrency(60, self._cfg()) == 20
 
     def test_ninety_targets_clamped_to_max(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # 90//3=30 > 20
         assert _compute_concurrency(90, self._cfg()) == 20
 
     def test_custom_min_max_clamped_to_max(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # n=30, min=1, max=5: 30//3=10 > 5
         assert _compute_concurrency(30, self._cfg(min_c=1, max_c=5)) == 5
 
     def test_custom_min_max_clamped_to_min(self):
         from mutmut_llm.pipeline import _compute_concurrency
+
         # n=3, min=10, max=20: 3//3=1 < 10
         assert _compute_concurrency(3, self._cfg(min_c=10, max_c=20)) == 10
 
 
 class TestCallLlmAndValidateAsync:
     async def test_valid_mutations_returned(self, tmp_path):
-        import asyncio
         from mutmut_llm.pipeline import _call_llm_and_validate_async
         from tests.conftest import make_async_mock_client, make_mock_response
 
         mutations = [
             {"mutated_code": "def f(): return 2", "description": "change constant"},
         ]
-        client = make_async_mock_client([make_mock_response(mutations, input_tokens=100, output_tokens=50)])
+        client = make_async_mock_client(
+            [make_mock_response(mutations, input_tokens=100, output_tokens=50)]
+        )
 
         target = ScopeTarget(
             file_path="f.py",
@@ -285,7 +303,9 @@ class TestCallLlmAndValidateAsync:
         from tests.conftest import make_async_mock_client, make_mock_response
         import warnings
 
-        client = make_async_mock_client([make_mock_response([], stop_reason="max_tokens")])
+        client = make_async_mock_client(
+            [make_mock_response([], stop_reason="max_tokens")]
+        )
         target = ScopeTarget(
             file_path="f.py",
             function_name="f",
@@ -302,7 +322,6 @@ class TestCallLlmAndValidateAsync:
 
     async def test_timeout_raises(self):
         import asyncio
-        from unittest.mock import AsyncMock
         from mutmut_llm.pipeline import _call_llm_and_validate_async
 
         async def slow_create(**kwargs):
@@ -350,21 +369,25 @@ class TestCallLlmAndValidateAsync:
 class TestComputeBackoff:
     def test_attempt_zero(self):
         from mutmut_llm.pipeline import _compute_backoff
+
         d = _compute_backoff(0, 1.0)
         assert 1.0 <= d <= 1.5
 
     def test_attempt_one(self):
         from mutmut_llm.pipeline import _compute_backoff
+
         d = _compute_backoff(1, 1.0)
         assert 2.0 <= d <= 2.5
 
     def test_attempt_two(self):
         from mutmut_llm.pipeline import _compute_backoff
+
         d = _compute_backoff(2, 1.0)
         assert 4.0 <= d <= 4.5
 
     def test_capped_at_thirty(self):
         from mutmut_llm.pipeline import _compute_backoff
+
         # 1.0 * 2^10 = 1024 >> 30, capped at 30
         d = _compute_backoff(10, 1.0)
         assert 30.0 <= d <= 30.5
@@ -373,6 +396,7 @@ class TestComputeBackoff:
 class TestCallLlmAsync:
     def _make_target(self):
         from mutmut_llm.discovery import GenerationTarget as ScopeTarget
+
         return ScopeTarget(
             file_path="f.py",
             function_name="f",
@@ -382,6 +406,7 @@ class TestCallLlmAsync:
 
     def _make_semaphore(self, n=5):
         from mutmut_llm.pipeline import TrackedSemaphore
+
         return TrackedSemaphore(n)
 
     async def test_successful_call_returns_result(self):
@@ -402,7 +427,6 @@ class TestCallLlmAsync:
 
     async def test_cancel_event_prevents_call(self):
         import asyncio
-        from unittest.mock import AsyncMock
         from mutmut_llm.pipeline import _call_llm_async
         from mutmut_llm.config import LLMConfig
 
@@ -420,14 +444,16 @@ class TestCallLlmAsync:
     async def test_skip_on_permanent_error(self):
         import asyncio
         import anthropic
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
         from mutmut_llm.pipeline import _call_llm_async
         from mutmut_llm.config import LLMConfig
 
         response = MagicMock()
         response.status_code = 400
         response.headers = {}
-        exc = anthropic.BadRequestError(message="bad request", response=response, body=None)
+        exc = anthropic.BadRequestError(
+            message="bad request", response=response, body=None
+        )
 
         client = AsyncMock()
         client.messages.create = AsyncMock(side_effect=exc)
@@ -444,14 +470,16 @@ class TestCallLlmAsync:
     async def test_stop_on_fatal_error(self):
         import asyncio
         import anthropic
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
         from mutmut_llm.pipeline import _call_llm_async
         from mutmut_llm.config import LLMConfig
 
         response = MagicMock()
         response.status_code = 401
         response.headers = {}
-        exc = anthropic.AuthenticationError(message="invalid key", response=response, body=None)
+        exc = anthropic.AuthenticationError(
+            message="invalid key", response=response, body=None
+        )
 
         client = AsyncMock()
         client.messages.create = AsyncMock(side_effect=exc)
@@ -467,7 +495,7 @@ class TestCallLlmAsync:
     async def test_retry_on_transient_error(self):
         import asyncio
         import anthropic
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import MagicMock
         from mutmut_llm.pipeline import _call_llm_async
         from mutmut_llm.config import LLMConfig
         from tests.conftest import make_mock_response
@@ -475,18 +503,25 @@ class TestCallLlmAsync:
         response = MagicMock()
         response.status_code = 500
         response.headers = {}
-        exc = anthropic.InternalServerError(message="server error", response=response, body=None)
+        exc = anthropic.InternalServerError(
+            message="server error", response=response, body=None
+        )
 
-        success_response = make_mock_response([{"mutated_code": "def f(): return 2", "description": ""}])
+        success_response = make_mock_response(
+            [{"mutated_code": "def f(): return 2", "description": ""}]
+        )
         client = AsyncMock()
         client.messages.create = AsyncMock(side_effect=[exc, success_response])
 
-        config = LLMConfig(api_key="test-key", max_retries=2, base_backoff_seconds=0.001)
+        config = LLMConfig(
+            api_key="test-key", max_retries=2, base_backoff_seconds=0.001
+        )
         cancel_event = asyncio.Event()
         sem = self._make_semaphore()
         target = self._make_target()
 
         sleep_calls = []
+
         async def mock_sleep(delay):
             sleep_calls.append(delay)
 
@@ -500,19 +535,23 @@ class TestCallLlmAsync:
     async def test_max_retries_exhausted_returns_empty(self):
         import asyncio
         import anthropic
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import MagicMock
         from mutmut_llm.pipeline import _call_llm_async
         from mutmut_llm.config import LLMConfig
 
         response = MagicMock()
         response.status_code = 500
         response.headers = {}
-        exc = anthropic.InternalServerError(message="server error", response=response, body=None)
+        exc = anthropic.InternalServerError(
+            message="server error", response=response, body=None
+        )
 
         client = AsyncMock()
         client.messages.create = AsyncMock(side_effect=exc)
 
-        config = LLMConfig(api_key="test-key", max_retries=2, base_backoff_seconds=0.001)
+        config = LLMConfig(
+            api_key="test-key", max_retries=2, base_backoff_seconds=0.001
+        )
         cancel_event = asyncio.Event()
         sem = self._make_semaphore()
         target = self._make_target()
@@ -525,4 +564,3 @@ class TestCallLlmAsync:
 
         assert result.mutations == []
         assert client.messages.create.call_count == 3  # 1 initial + 2 retries
-

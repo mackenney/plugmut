@@ -77,7 +77,9 @@ def live_generation_result():
         context=SAMPLE_CONTEXT,
     )
     result = asyncio.run(
-        _call_llm_and_validate_async(client, config, target, config.max_mutations_per_function)
+        _call_llm_and_validate_async(
+            client, config, target, config.max_mutations_per_function
+        )
     )
     return result
 
@@ -116,6 +118,7 @@ def live_pipeline_result(tmp_path_factory):
 
 def _resolve_targets(paths):
     from mutmut_llm.discovery import resolve_scope_deep
+
     scope = resolve_scope_deep(paths=paths, budget=1)
     return scope.targets
 
@@ -266,7 +269,9 @@ class TestFullPipeline:
                 total_budget=1,
             )
 
-        assert stats.api_calls == 0, f"Expected 0 API calls (cache hit), got {stats.api_calls}"
+        assert stats.api_calls == 0, (
+            f"Expected 0 API calls (cache hit), got {stats.api_calls}"
+        )
 
 
 @skip_no_live
