@@ -87,7 +87,7 @@ class TestBuildExclusionList:
         result = build_exclusion_list(operator_lists=[ops])
         assert isinstance(result, str)
         # All 1000 have same description, so dedup should collapse to 1
-        lines = [l for l in result.split("\n") if l.strip()]
+        lines = [line for line in result.split("\n") if line.strip()]
         assert len(lines) == 1
 
     def test_deduplication(self) -> None:

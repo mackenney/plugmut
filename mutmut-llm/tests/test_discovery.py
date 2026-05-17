@@ -627,8 +627,12 @@ class TestAllocateBudget:
 
     def test_complex_function_gets_more_than_simple(self):
         targets = [
-            GenerationTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
-            GenerationTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
+            GenerationTarget(
+                file_path="f.py", function_name="simple", source=SIMPLE_FUNC
+            ),
+            GenerationTarget(
+                file_path="f.py", function_name="complex", source=COMPLEX_FUNC
+            ),
         ]
         alloc = _allocate_budget(targets, 50, 10)
         assert alloc["f.py::complex"] > alloc["f.py::simple"]
@@ -661,8 +665,12 @@ class TestAllocateBudget:
 
     def test_file_qualified_keys_no_collision(self):
         targets = [
-            GenerationTarget(file_path="a.py", function_name="helper", source=SIMPLE_FUNC),
-            GenerationTarget(file_path="b.py", function_name="helper", source=SIMPLE_FUNC),
+            GenerationTarget(
+                file_path="a.py", function_name="helper", source=SIMPLE_FUNC
+            ),
+            GenerationTarget(
+                file_path="b.py", function_name="helper", source=SIMPLE_FUNC
+            ),
         ]
         alloc = _allocate_budget(targets, 10, 5)
         assert len(alloc) == 2
@@ -670,14 +678,20 @@ class TestAllocateBudget:
         assert "b.py::helper" in alloc
 
     def test_min_per_function_parameter(self):
-        targets = [GenerationTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC)]
+        targets = [
+            GenerationTarget(file_path="f.py", function_name="a", source=SIMPLE_FUNC)
+        ]
         alloc = _allocate_budget(targets, 100, 10, min_per_function=5)
         assert alloc["f.py::a"] >= 5
 
     def test_scaling_preserves_relative_order(self):
         targets = [
-            GenerationTarget(file_path="f.py", function_name="simple", source=SIMPLE_FUNC),
-            GenerationTarget(file_path="f.py", function_name="complex", source=COMPLEX_FUNC),
+            GenerationTarget(
+                file_path="f.py", function_name="simple", source=SIMPLE_FUNC
+            ),
+            GenerationTarget(
+                file_path="f.py", function_name="complex", source=COMPLEX_FUNC
+            ),
         ]
         alloc = _allocate_budget(targets, 5, 10)
         assert alloc["f.py::complex"] >= alloc["f.py::simple"]

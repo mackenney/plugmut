@@ -148,9 +148,9 @@ class TestFormatRunTable:
         lines = table.strip().split("\n")
         # Skip header (2 lines), first data line should be survived
         data_lines = [
-            l
-            for l in lines[2:]
-            if l.strip() and not l.startswith("-") and "Total:" not in l
+            line
+            for line in lines[2:]
+            if line.strip() and not line.startswith("-") and "Total:" not in line
         ]
         assert data_lines[0].startswith("survived")
 

@@ -21,6 +21,7 @@ from mutmut_llm.prompts import parse_llm_response
 # operator registry state is stable within a test session.
 SYSTEM_PROMPT = build_system_prompt()
 
+
 class TestSystemPrompt:
     def test_mentions_json_output(self):
         assert "JSON array" in SYSTEM_PROMPT

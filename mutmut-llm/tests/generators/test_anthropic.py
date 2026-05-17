@@ -1,20 +1,15 @@
 """Tests for AnthropicGenerator."""
+
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.discovery import GenerationTarget
 from mutmut_llm.generators.anthropic import (
     AnthropicGenerator,
     ErrorAction,
-    GenerationResult,
-    TrackedSemaphore,
-    _compute_backoff,
-    _compute_concurrency,
     classify_error,
 )
 from mutmut_llm.generators.base import GenerationStats
@@ -52,6 +47,7 @@ class TestAnthropicGeneratorInit:
 
     def test_run_method_exists(self):
         import inspect
+
         gen = AnthropicGenerator()
         assert "run" in [m for m, _ in inspect.getmembers(gen)]
 
@@ -59,7 +55,9 @@ class TestAnthropicGeneratorInit:
 class TestAnthropicGeneratorRunZeroBudget:
     def test_zero_budget_returns_empty_stats(self):
         gen = AnthropicGenerator(config=_config())
-        stats = gen.run(targets=[], budget_per_target={}, library=MagicMock(), total_budget=0)
+        stats = gen.run(
+            targets=[], budget_per_target={}, library=MagicMock(), total_budget=0
+        )
         assert isinstance(stats, GenerationStats)
         assert stats.api_calls == 0
         assert stats.mutations_generated == 0
@@ -67,7 +65,12 @@ class TestAnthropicGeneratorRunZeroBudget:
     def test_zero_budget_makes_no_api_calls(self):
         mock_library = MagicMock()
         gen = AnthropicGenerator(config=_config())
-        gen.run(targets=[_target()], budget_per_target={}, library=mock_library, total_budget=0)
+        gen.run(
+            targets=[_target()],
+            budget_per_target={},
+            library=mock_library,
+            total_budget=0,
+        )
         mock_library.query.assert_not_called()
 
 
@@ -75,9 +78,16 @@ class TestAnthropicGeneratorRunWithMockedApi:
     def test_run_generates_mutations(self, tmp_path):
         from tests.conftest import make_mock_response
 
-        mutations = [{"mutated_code": "def f():\n    return 2\n", "description": "change constant"}]
+        mutations = [
+            {
+                "mutated_code": "def f():\n    return 2\n",
+                "description": "change constant",
+            }
+        ]
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=make_mock_response(mutations))
+        mock_client.messages.create = AsyncMock(
+            return_value=make_mock_response(mutations)
+        )
 
         target = _target(source="def f():\n    return 1\n")
         library = Library(base_dir=tmp_path)
@@ -92,14 +102,15 @@ class TestAnthropicGeneratorRunWithMockedApi:
         assert mock_client.messages.create.call_count == 1
 
     def test_run_skips_cached_target(self, tmp_path):
-        from tests.conftest import make_mock_response
 
         source = "def f():\n    return 1\n"
         target = _target(source=source)
         library = Library(base_dir=tmp_path)
         config = _config()
 
-        mutations = [{"mutated_code": "def f():\n    return 2\n", "description": "change"}]
+        mutations = [
+            {"mutated_code": "def f():\n    return 2\n", "description": "change"}
+        ]
         library.add("f", "f.py", source, mutations, config.model)
 
         mock_client = AsyncMock()
@@ -114,12 +125,20 @@ class TestAnthropicGeneratorRunWithMockedApi:
     def test_run_budget_limits_calls(self, tmp_path):
         from tests.conftest import make_mock_response
 
-        mutations = [{"mutated_code": "def f():\n    return 2\n", "description": "change"}]
+        mutations = [
+            {"mutated_code": "def f():\n    return 2\n", "description": "change"}
+        ]
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=make_mock_response(mutations))
+        mock_client.messages.create = AsyncMock(
+            return_value=make_mock_response(mutations)
+        )
 
         targets = [
-            _target(file_path=f"f{i}.py", function_name="f", source="def f():\n    return 1\n")
+            _target(
+                file_path=f"f{i}.py",
+                function_name="f",
+                source="def f():\n    return 1\n",
+            )
             for i in range(3)
         ]
         library = Library(base_dir=tmp_path)
@@ -135,9 +154,13 @@ class TestAnthropicGeneratorRunWithMockedApi:
         from tests.conftest import make_mock_response
 
         source = "def f():\n    return 1\n"
-        mutations = [{"mutated_code": "def f():\n    return 2\n", "description": "change"}]
+        mutations = [
+            {"mutated_code": "def f():\n    return 2\n", "description": "change"}
+        ]
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=make_mock_response(mutations))
+        mock_client.messages.create = AsyncMock(
+            return_value=make_mock_response(mutations)
+        )
 
         target = _target(source=source)
         library = Library(base_dir=tmp_path)
@@ -154,10 +177,14 @@ class TestAnthropicGeneratorRunWithMockedApi:
     def test_run_returns_cost_stats(self, tmp_path):
         from tests.conftest import make_mock_response
 
-        mutations = [{"mutated_code": "def f():\n    return 2\n", "description": "change"}]
+        mutations = [
+            {"mutated_code": "def f():\n    return 2\n", "description": "change"}
+        ]
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(
-            return_value=make_mock_response(mutations, input_tokens=100, output_tokens=50)
+            return_value=make_mock_response(
+                mutations, input_tokens=100, output_tokens=50
+            )
         )
 
         target = _target(source="def f():\n    return 1\n")
@@ -180,11 +207,15 @@ class TestAnthropicGeneratorCacheSeparation:
         target = _target(source=source)
         library = Library(base_dir=tmp_path)
 
-        mutations = [{"mutated_code": "def f():\n    return 2\n", "description": "change"}]
+        mutations = [
+            {"mutated_code": "def f():\n    return 2\n", "description": "change"}
+        ]
         library.add("f", "f.py", source, mutations, "claude-opus-4-6")
 
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=make_mock_response(mutations))
+        mock_client.messages.create = AsyncMock(
+            return_value=make_mock_response(mutations)
+        )
 
         config = _config(model="claude-sonnet-4-6")
         gen = AnthropicGenerator(config=config)

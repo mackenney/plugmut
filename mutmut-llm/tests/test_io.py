@@ -393,7 +393,7 @@ class TestCleanStaleTemps:
         subdir = tmp_path / "subdir.tmp"
         subdir.mkdir()
 
-        removed = clean_stale_temps(tmp_path, max_age_seconds=0)
+        clean_stale_temps(tmp_path, max_age_seconds=0)
         assert subdir.exists()
 
 

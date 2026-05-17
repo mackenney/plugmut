@@ -396,9 +396,15 @@ class TestMutmutPostRun:
         monkeypatch.setattr(mod, "_library_instance", None)
         monkeypatch.setattr(mod, "_llm_mutant_names", set())
 
-        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
-        mutmut_post_test(mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.2)
-        mutmut_post_test(mutant_name="x_foo__mutmut_3", exit_code=1, status="killed", duration=0.3)
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1
+        )
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.2
+        )
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_3", exit_code=1, status="killed", duration=0.3
+        )
 
         sfmd = MagicMock()
         sfmd.source_by_key = {
@@ -430,10 +436,14 @@ class TestMutmutPostRun:
         # Heuristic says mutmut_1 is LLM and mutmut_2 is builtin — source_by_key says the opposite
         monkeypatch.setattr(mod, "_llm_mutant_names", {"x_foo__mutmut_1"})
 
-        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
-        mutmut_post_test(mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.2)
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1
+        )
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_2", exit_code=0, status="survived", duration=0.2
+        )
 
-        assert run.results[0].is_llm is True   # heuristic (wrong)
+        assert run.results[0].is_llm is True  # heuristic (wrong)
         assert run.results[1].is_llm is False  # heuristic (wrong)
 
         sfmd = MagicMock()
@@ -451,7 +461,7 @@ class TestMutmutPostRun:
         mutmut_post_run(source_file_mutation_data=[sfmd])
 
         assert run.results[0].is_llm is False  # corrected by source_by_key
-        assert run.results[1].is_llm is True   # corrected by source_by_key
+        assert run.results[1].is_llm is True  # corrected by source_by_key
 
     def test_multiple_sfmd_objects_combined(self, monkeypatch, tmp_path):
         """LLM mutants from multiple SourceFileMutationData objects are all collected."""
@@ -463,8 +473,12 @@ class TestMutmutPostRun:
         monkeypatch.setattr(mod, "_library_instance", None)
         monkeypatch.setattr(mod, "_llm_mutant_names", set())
 
-        mutmut_post_test(mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1)
-        mutmut_post_test(mutant_name="x_bar__mutmut_1", exit_code=1, status="killed", duration=0.2)
+        mutmut_post_test(
+            mutant_name="x_foo__mutmut_1", exit_code=1, status="killed", duration=0.1
+        )
+        mutmut_post_test(
+            mutant_name="x_bar__mutmut_1", exit_code=1, status="killed", duration=0.2
+        )
 
         sfmd_a = MagicMock()
         sfmd_a.source_by_key = {"x_foo__mutmut_1": "mutmut-llm"}
@@ -479,7 +493,7 @@ class TestMutmutPostRun:
 
         mutmut_post_run(source_file_mutation_data=[sfmd_a, sfmd_b])
 
-        assert run.results[0].is_llm is True   # from sfmd_a
+        assert run.results[0].is_llm is True  # from sfmd_a
         assert run.results[1].is_llm is False  # from sfmd_b
 
 

@@ -1,4 +1,5 @@
 """Tests for generator base protocol and types."""
+
 from mutmut_llm.generators import Generator, GenerationStats
 
 

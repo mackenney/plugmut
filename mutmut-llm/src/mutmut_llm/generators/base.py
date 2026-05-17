@@ -1,4 +1,5 @@
 """Base protocol and types for mutation generators."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

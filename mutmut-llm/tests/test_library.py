@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import warnings
 
-import pytest
 
 from mutmut_llm.library import Library, LibraryEntry, source_hash, _entry_filename
 
@@ -225,7 +224,9 @@ class TestLibraryQuery:
     def test_query_returns_all_models(self, tmp_path):
         lib = Library(base_dir=tmp_path)
         lib.add("add", "src/math.py", SIMPLE_SOURCE, [SIMPLE_MUTATION], "claude-3")
-        lib.add("add", "src/math.py", SIMPLE_SOURCE, [MUTATION_WITH_DESC], "claude-opus")
+        lib.add(
+            "add", "src/math.py", SIMPLE_SOURCE, [MUTATION_WITH_DESC], "claude-opus"
+        )
         src_hash = source_hash(SIMPLE_SOURCE)
         results = lib.query(src_hash)
         assert len(results) == 2
@@ -256,7 +257,13 @@ class TestLibraryListAll:
     def test_list_all_returns_all_entries(self, tmp_path):
         lib = Library(base_dir=tmp_path)
         lib.add("add", "src/math.py", SIMPLE_SOURCE, [SIMPLE_MUTATION], "claude-3")
-        lib.add("sub", "src/math.py", "def sub(a,b):\n return a-b", [SIMPLE_MUTATION], "claude-3")
+        lib.add(
+            "sub",
+            "src/math.py",
+            "def sub(a,b):\n return a-b",
+            [SIMPLE_MUTATION],
+            "claude-3",
+        )
         all_entries = lib.list_all()
         assert len(all_entries) == 2
 
@@ -296,7 +303,9 @@ class TestLibraryClear:
     def test_clear_removes_files_returns_count(self, tmp_path):
         lib = Library(base_dir=tmp_path)
         lib.add("add", "src/math.py", SIMPLE_SOURCE, [SIMPLE_MUTATION], "claude-3")
-        lib.add("add", "src/math.py", SIMPLE_SOURCE, [MUTATION_WITH_DESC], "claude-opus")
+        lib.add(
+            "add", "src/math.py", SIMPLE_SOURCE, [MUTATION_WITH_DESC], "claude-opus"
+        )
         count = lib.clear()
         assert count == 2
         entries_dir = tmp_path / ".plugmut-llm" / "entries"

@@ -14,7 +14,9 @@ if TYPE_CHECKING:
 
     import libcst as cst
 
-    OperatorList = Sequence[tuple[type[cst.CSTNode], Callable[..., Iterable[cst.CSTNode]]]]
+    OperatorList = Sequence[
+        tuple[type[cst.CSTNode], Callable[..., Iterable[cst.CSTNode]]]
+    ]
 
 _CODE_BLOCK_RE = re.compile(r"```(?:\w*)\s*\n?(.*?)\n?```", re.DOTALL)
 
@@ -136,7 +138,10 @@ def _get_registered_operators() -> list[OperatorList]:
         pm = get_plugin_manager()
         return pm.hook.mutmut_register_operators()
     except Exception:
-        log.warning("Error querying registered operators; falling back to hardcoded exclusions", exc_info=True)
+        log.warning(
+            "Error querying registered operators; falling back to hardcoded exclusions",
+            exc_info=True,
+        )
         return []
 
 
@@ -151,7 +156,9 @@ def build_system_prompt(operator_lists: list[OperatorList] | None = None) -> str
     return SYSTEM_PROMPT_TEMPLATE.format(exclusion_list=exclusion_list)
 
 
-def build_system_with_context(context: str = "", ttl: str = "5m", system_prompt: str | None = None) -> list[dict]:
+def build_system_with_context(
+    context: str = "", ttl: str = "5m", system_prompt: str | None = None
+) -> list[dict]:
     """Build system blocks with cache_control on the last block.
 
     Combines the system prompt with file-level context so the entire
