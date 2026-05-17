@@ -61,6 +61,16 @@ class TestOperatorReverseIteration:
         mutants = list(operator_reverse_iteration(node))
         assert mutants == []
 
+    def test_async_for_no_mutation(self):
+        # reversed() breaks async iteration protocol; async for must be skipped
+        code = "async def f():\n    async for x in aiter:\n        pass\n"
+        module = cst.parse_module(code)
+        func = module.body[0]
+        assert isinstance(func, cst.FunctionDef)
+        stmt = func.body.body[0]
+        assert isinstance(stmt, cst.For)
+        mutants = list(operator_reverse_iteration(stmt))
+        assert mutants == []
 
 class TestReverseIterationIntegration:
     def test_create_mutations_includes_reverse_iteration(self):

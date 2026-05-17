@@ -11,6 +11,8 @@ def operator_reverse_iteration(node: cst.For) -> Iterable[cst.For]:
 
     ``for item in items:`` becomes ``for item in reversed(items):``.
     """
+    if node.asynchronous is not None:
+        return
     iter_expr = node.iter
     if isinstance(iter_expr, cst.Call) and m.matches(iter_expr.func, m.Name("reversed")):
         return
