@@ -3,12 +3,37 @@ name = "mutmut-dedup"
 version = "0.1.0"
 description = "Structural deduplication plugin for mutmut"
 requires-python = ">=3.10"
+readme = "README.md"
+# Recommended: BSD-3-Clause — update {{LICENSE}} when decided
+license = "BSD-3-Clause"
+authors = [
+    # email: {{AUTHOR_EMAIL}}
+    { name = "{{AUTHOR_NAME}}", email = "todo@example.com" },
+]
+keywords = ["mutation testing", "deduplication", "testing", "mutations", "libcst"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
 
 dependencies = [
     "plugmut>=4.0.0",
     "pluggy>=1.5.0",
     "libcst>=1.8.5",
 ]
+
+[project.urls]
+Homepage = "{{REPO_URL}}"
+Repository = "{{REPO_URL}}"
+Issues = "{{REPO_URL}}/issues"
 
 [project.entry-points.plugmut]
 dedup = "mutmut_dedup.plugin"
