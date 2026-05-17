@@ -15,8 +15,8 @@ def operator_default_param_mutation(node: cst.Param) -> Iterable[cst.Param]:
     """Mutate default parameter values in ways builtins don't cover.
 
     - ``None`` → ``0``: builtins skip None
-    - Non-literal defaults (names, calls, collections, etc.) → ``None``:
-      builtins only mutate literal tokens, not compound expressions
+    - Non-builtin name defaults (e.g. ``SENTINEL``, ``MISSING``) → ``None``:
+      builtins only flip True/False among names
     """
     if node.default is None:
         return
@@ -30,9 +30,6 @@ def operator_default_param_mutation(node: cst.Param) -> Iterable[cst.Param]:
         yield node.with_changes(default=cst.Integer("0"))
     elif isinstance(default, cst.Name) and default.value not in _BUILTIN_NAMES:
         # Non-builtin name default (e.g. SENTINEL, MISSING): builtins only flip True/False
-        yield node.with_changes(default=cst.Name("None"))
-    elif not isinstance(default, (cst.Name, cst.Integer, cst.Float, cst.SimpleString, cst.FormattedString, cst.ConcatenatedString)):
-        # Compound/collection default ([], {}, func()): builtins can't touch these
         yield node.with_changes(default=cst.Name("None"))
 
 

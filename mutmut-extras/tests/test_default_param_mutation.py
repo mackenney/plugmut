@@ -47,20 +47,6 @@ class TestOperatorDefaultParamMutation:
         assert isinstance(mutants[0].default, cst.Name)
         assert mutants[0].default.value == "None"
 
-    def test_call_default_becomes_none(self):
-        node = _param_with_default("def f(x=list()):")
-        mutants = list(operator_default_param_mutation(node))
-        assert len(mutants) == 1
-        assert isinstance(mutants[0].default, cst.Name)
-        assert mutants[0].default.value == "None"
-
-    def test_tuple_default_becomes_none(self):
-        node = _param_with_default("def f(x=(1, 2)):")
-        mutants = list(operator_default_param_mutation(node))
-        assert len(mutants) == 1
-        assert isinstance(mutants[0].default, cst.Name)
-        assert mutants[0].default.value == "None"
-
     # Cases builtins already handle: operator must NOT generate these
 
     def test_bool_true_not_mutated(self):
