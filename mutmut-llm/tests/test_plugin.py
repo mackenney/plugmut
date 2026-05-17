@@ -99,7 +99,8 @@ class TestMutmutConfigure:
 
         mutmut_configure(config=MagicMock(spec=[]))
 
-        assert ops_mod._cache_index is None
+        assert ops_mod._cache_index is None  # legacy index cleared
+        assert ops_mod._library is not None  # new Library instance set
 
     def test_initializes_current_run(self, monkeypatch):
         import mutmut_llm.plugin as mod
@@ -141,7 +142,7 @@ class TestMutmutRegisterCommands:
         cli = click.Group()
         mutmut_register_commands(cli_group=cli)
 
-        cmd = cli.get_command(None, "generate")
+        cmd = cli.get_command(None, "generate")  # type: ignore[arg-type]
         assert cmd is not None
         assert cmd.name == "generate"
 
@@ -149,7 +150,8 @@ class TestMutmutRegisterCommands:
         cli = click.Group()
         mutmut_register_commands(cli_group=cli)
 
-        cmd = cli.get_command(None, "generate")
+        cmd = cli.get_command(None, "generate")  # type: ignore[arg-type]
+        assert cmd is not None
         param_names = [p.name for p in cmd.params]
         assert "budget" in param_names
         assert "dry_run" in param_names
@@ -159,7 +161,7 @@ class TestMutmutRegisterCommands:
         cli = click.Group()
         mutmut_register_commands(cli_group=cli)
 
-        cmd = cli.get_command(None, "llm-status")
+        cmd = cli.get_command(None, "llm-status")  # type: ignore[arg-type]
         assert cmd is not None
 
 
@@ -318,7 +320,7 @@ class TestMutmutPostRun:
 
         cache_root = tmp_path / "cache"
         monkeypatch.setattr(
-            storage, "_runs_dir", lambda cache_root=None: cache_root / "runs"
+            storage, "_runs_dir", lambda cache_root=None: cache_root / "runs"  # type: ignore[operator]
         )
         monkeypatch.setattr(
             "mutmut_llm.plugin.save_run",
@@ -385,154 +387,135 @@ class TestMutmutPostRun:
 class TestMultiModelIndex:
     """Tests for multi-model cache index and operator deduplication."""
 
-    def test_index_merges_across_models(self, monkeypatch, tmp_path):
+    def test_index_merges_across_models(self, tmp_path):
         """Two models for the same function both appear under the same source_hash key."""
-        from mutmut_llm.cache import source_hash, write_cache_entry
-        from mutmut_llm.operators import _build_cache_index, _reset_cache_index
+        from mutmut_llm.library import Library
+        from mutmut_llm.operators import reset_library, set_library
 
         source = "def foo(): return 1"
         src_hash = source_hash(source)
 
-        entry_a = CacheEntry(
+        lib = Library(base_dir=tmp_path)
+        lib.add(
             function_name="foo",
             file_path="src/mod.py",
-            source_hash=src_hash,
-            mutations=[CachedMutation("def foo(): return 2", "sonnet")],
+            source=source,
+            mutations=[{"mutated_code": "def foo(): return 2"}],
             model="claude-sonnet-4-6",
         )
-        entry_b = CacheEntry(
+        lib.add(
             function_name="foo",
             file_path="src/mod.py",
-            source_hash=src_hash,
-            mutations=[CachedMutation("def foo(): return 3", "opus")],
+            source=source,
+            mutations=[{"mutated_code": "def foo(): return 3"}],
             model="claude-opus-4-6",
         )
-        write_cache_entry(entry_a, base_dir=tmp_path)
-        write_cache_entry(entry_b, base_dir=tmp_path)
+        set_library(lib)
+        try:
+            entries = lib.query(src_hash)
+            assert len(entries) == 2
+        finally:
+            reset_library()
 
-        monkeypatch.setattr(
-            "mutmut_llm.operators.list_cache_entries",
-            lambda: [entry_a, entry_b],
-        )
-        _reset_cache_index()
-
-        index = _build_cache_index()
-        assert src_hash in index
-        assert len(index[src_hash]) == 2
-
-    def test_index_handles_identical_functions_different_files(self, monkeypatch):
-        """Identical functions in different files both appear in the index (collision fix)."""
-        from mutmut_llm.cache import source_hash
-        from mutmut_llm.operators import _build_cache_index, _reset_cache_index
+    def test_index_handles_identical_functions_different_files(self, tmp_path):
+        """Identical functions in different files both appear under the same source_hash key."""
+        from mutmut_llm.library import Library
+        from mutmut_llm.operators import reset_library, set_library
 
         source = "def get_name(self):\n    return self.name"
         src_hash = source_hash(source)
 
-        entry_a = CacheEntry(
+        lib = Library(base_dir=tmp_path)
+        lib.add(
             function_name="get_name",
             file_path="models/user.py",
-            source_hash=src_hash,
-            mutations=[CachedMutation("def get_name(self):\n    return ''", "empty")],
-            model="claude-sonnet-4-6",
+            source=source,
+            mutations=[{"mutated_code": "def get_name(self):\n    return ''"}],
+            model="m",
         )
-        entry_b = CacheEntry(
+        lib.add(
             function_name="get_name",
             file_path="models/product.py",
-            source_hash=src_hash,
-            mutations=[CachedMutation("def get_name(self):\n    return None", "none")],
-            model="claude-sonnet-4-6",
+            source=source,
+            mutations=[{"mutated_code": "def get_name(self):\n    return None"}],
+            model="m",
         )
+        set_library(lib)
+        try:
+            entries = lib.query(src_hash)
+            assert len(entries) == 2
+        finally:
+            reset_library()
 
-        monkeypatch.setattr(
-            "mutmut_llm.operators.list_cache_entries",
-            lambda: [entry_a, entry_b],
-        )
-        _reset_cache_index()
-
-        index = _build_cache_index()
-        assert len(index[src_hash]) == 2
-
-    def test_operator_deduplicates_across_models(self, monkeypatch):
+    def test_operator_deduplicates_across_models(self, tmp_path):
         """operator_llm yields each unique mutation exactly once across models."""
-        from mutmut_llm.cache import source_hash
-        from mutmut_llm.operators import _reset_cache_index, operator_llm
+        from mutmut_llm.library import Library
+        from mutmut_llm.operators import operator_llm, reset_library, set_library
 
         source = "def foo():\n    return 1\n"
-        src_hash = source_hash(source)
-
-        shared_mutation = "def foo():\n    return 2\n"
-        entry_a = CacheEntry(
+        lib = Library(base_dir=tmp_path)
+        lib.add(
             function_name="foo",
             file_path="src/mod.py",
-            source_hash=src_hash,
+            source=source,
             mutations=[
-                CachedMutation(shared_mutation, "same in both"),
-                CachedMutation("def foo():\n    return 3\n", "sonnet only"),
+                {"mutated_code": "def foo():\n    return 2\n"},
+                {"mutated_code": "def foo():\n    return 3\n"},
             ],
             model="claude-sonnet-4-6",
         )
-        entry_b = CacheEntry(
+        lib.add(
             function_name="foo",
             file_path="src/mod.py",
-            source_hash=src_hash,
+            source=source,
             mutations=[
-                CachedMutation(shared_mutation, "same in both"),
-                CachedMutation("def foo():\n    return 4\n", "opus only"),
+                {"mutated_code": "def foo():\n    return 2\n"},
+                {"mutated_code": "def foo():\n    return 4\n"},
             ],
             model="claude-opus-4-6",
         )
+        set_library(lib)
+        try:
+            node = cst.parse_module(source).body[0]
+            assert isinstance(node, cst.FunctionDef)
+            results = list(operator_llm(node))
+            assert len(results) == 3
+            result_codes = {cst.Module(body=[r]).code for r in results}
+            assert "def foo():\n    return 2\n" in result_codes
+            assert "def foo():\n    return 3\n" in result_codes
+            assert "def foo():\n    return 4\n" in result_codes
+        finally:
+            reset_library()
 
-        monkeypatch.setattr(
-            "mutmut_llm.operators.list_cache_entries",
-            lambda: [entry_a, entry_b],
-        )
-        _reset_cache_index()
-
-        node = cst.parse_module(source).body[0]
-        results = list(operator_llm(node))
-
-        # 3 unique mutations: return 2, return 3, return 4 (shared deduped)
-        assert len(results) == 3
-        result_codes = {cst.Module(body=[r]).code for r in results}
-        assert "def foo():\n    return 2\n" in result_codes
-        assert "def foo():\n    return 3\n" in result_codes
-        assert "def foo():\n    return 4\n" in result_codes
-
-    def test_operator_yields_from_multiple_files_same_hash(self, monkeypatch):
+    def test_operator_yields_from_multiple_files_same_hash(self, tmp_path):
         """Identical functions in different files both contribute mutations."""
-        from mutmut_llm.cache import source_hash
-        from mutmut_llm.operators import _reset_cache_index, operator_llm
+        from mutmut_llm.library import Library
+        from mutmut_llm.operators import operator_llm, reset_library, set_library
 
         source = "def get_name(self):\n    return self.name\n"
-        src_hash = source_hash(source)
-
-        entry_a = CacheEntry(
+        lib = Library(base_dir=tmp_path)
+        lib.add(
             function_name="get_name",
             file_path="models/user.py",
-            source_hash=src_hash,
-            mutations=[CachedMutation("def get_name(self):\n    return ''\n", "empty")],
+            source=source,
+            mutations=[{"mutated_code": "def get_name(self):\n    return ''\n"}],
             model="claude-sonnet-4-6",
         )
-        entry_b = CacheEntry(
+        lib.add(
             function_name="get_name",
             file_path="models/product.py",
-            source_hash=src_hash,
-            mutations=[
-                CachedMutation("def get_name(self):\n    return None\n", "none")
-            ],
+            source=source,
+            mutations=[{"mutated_code": "def get_name(self):\n    return None\n"}],
             model="claude-sonnet-4-6",
         )
-
-        monkeypatch.setattr(
-            "mutmut_llm.operators.list_cache_entries",
-            lambda: [entry_a, entry_b],
-        )
-        _reset_cache_index()
-
-        node = cst.parse_module(source).body[0]
-        results = list(operator_llm(node))
-
-        assert len(results) == 2
+        set_library(lib)
+        try:
+            node = cst.parse_module(source).body[0]
+            assert isinstance(node, cst.FunctionDef)
+            results = list(operator_llm(node))
+            assert len(results) == 2
+        finally:
+            reset_library()
 
 
 class TestFullLifecycle:
@@ -558,10 +541,7 @@ class TestFullLifecycle:
             "mutmut_llm.plugin.list_cache_entries", lambda: cache_entries
         )
 
-        # Redirect save_run to tmp_path
-        original_save_run = (
-            mod.save_run.__wrapped__ if hasattr(mod.save_run, "__wrapped__") else None
-        )
+        # original_save_run kept for reference; patched_save_run calls real save_run directly
 
         def patched_save_run(r):
             from mutmut_llm.storage import save_run as real_save
@@ -635,14 +615,33 @@ class TestFullLifecycle:
 class TestMutationCountConsistency:
     """_llm_mutation_count_by_function and operator_llm must agree after deduplication."""
 
-    def test_count_matches_actual_yielded_mutations(self, monkeypatch):
+    def test_count_matches_actual_yielded_mutations(self, monkeypatch, tmp_path):
         """Duplicate mutations across models are deduplicated in both count and operator."""
-        from mutmut_llm.operators import _reset_cache_index, operator_llm
+        from mutmut_llm.library import Library
+        from mutmut_llm.operators import operator_llm, reset_library, set_library
 
         source = "def compute():\n    return 42\n"
-        src_h = source_hash(source)
         shared_mutation = "def compute():\n    return 0\n"
+        src_h = source_hash(source)
 
+        lib = Library(base_dir=tmp_path)
+        lib.add(
+            function_name="compute",
+            file_path="src/calc.py",
+            source=source,
+            mutations=[{"mutated_code": shared_mutation}],
+            model="claude-sonnet-4-6",
+        )
+        lib.add(
+            function_name="compute",
+            file_path="src/calc.py",
+            source=source,
+            mutations=[{"mutated_code": shared_mutation}],
+            model="claude-opus-4-6",
+        )
+        set_library(lib)
+
+        # _llm_mutation_count_by_function reads via list_cache_entries (legacy path, step-06 fixes)
         entry_a = CacheEntry(
             function_name="compute",
             file_path="src/calc.py",
@@ -659,22 +658,20 @@ class TestMutationCountConsistency:
             model="claude-opus-4-6",
             cost_usd=0.02,
         )
-
-        monkeypatch.setattr(
-            "mutmut_llm.operators.list_cache_entries", lambda: [entry_a, entry_b]
-        )
         monkeypatch.setattr(
             "mutmut_llm.plugin.list_cache_entries", lambda: [entry_a, entry_b]
         )
-        _reset_cache_index()
 
-        node = cst.parse_module(source).body[0]
-        actual_mutations = list(operator_llm(node))
-        reported_count = _llm_mutation_count_by_function()
-
-        assert len(actual_mutations) == 1
-        assert reported_count["compute"] == 1
-        assert reported_count["compute"] == len(actual_mutations)
+        try:
+            node = cst.parse_module(source).body[0]
+            assert isinstance(node, cst.FunctionDef)
+            actual_mutations = list(operator_llm(node))
+            reported_count = _llm_mutation_count_by_function()
+            assert len(actual_mutations) == 1
+            assert reported_count["compute"] == 1
+            assert reported_count["compute"] == len(actual_mutations)
+        finally:
+            reset_library()
 
 
 class TestCostAggregationAcrossModels:

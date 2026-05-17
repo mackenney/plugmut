@@ -1,6 +1,6 @@
 """LLM mutation operator for mutmut.
 
-Reads pre-generated mutations from the file cache (populated by ``mutmut generate``)
+Reads pre-generated mutations from the Library (populated by ``mutmut generate``)
 and yields mutated ``FunctionDef`` nodes through mutmut's standard operator interface.
 """
 
@@ -11,33 +11,44 @@ from collections.abc import Iterable
 
 import libcst as cst
 
-from mutmut_llm.cache import CacheEntry, list_cache_entries, source_hash
+from mutmut_llm.cache import CacheEntry  # kept until step-08
+from mutmut_llm.library import Library, source_hash
 
-_cache_index: dict[str, list[CacheEntry]] | None = None
+_library: Library | None = None
+_cache_index: dict[str, list[CacheEntry]] | None = None  # kept until step-08
+
+
+def set_library(library: Library) -> None:
+    """Set the Library instance for operator use. Called by plugin during configure."""
+    global _library
+    _library = library
+
+
+def reset_library() -> None:
+    """Reset the Library instance. For testing."""
+    global _library
+    _library = None
 
 
 def _reset_cache_index() -> None:
-    """Reset the in-memory cache index (for tests)."""
+    """Shim kept for plugin.py compatibility. Delegates to reset_library()."""
     global _cache_index
     _cache_index = None
+    reset_library()
 
 
 def _build_cache_index() -> dict[str, list[CacheEntry]]:
-    """Build index from all cache entries, keyed by source_hash.
+    """Legacy — kept until step-08."""
+    from mutmut_llm.cache import list_cache_entries as _list
 
-    source_hash is the primary key — avoids bare-vs-qualified name mismatch
-    (operator sees "bar", cache may store "Foo.bar").
-    Values are lists so entries from multiple models and identical functions
-    in different files all coexist instead of overwriting each other.
-    """
     index: dict[str, list[CacheEntry]] = {}
-    for entry in list_cache_entries():
+    for entry in _list():
         index.setdefault(entry.source_hash, []).append(entry)
     return index
 
 
 def _get_cache_index() -> dict[str, list[CacheEntry]]:
-    """Get or build the cache index."""
+    """Legacy — kept until step-08."""
     global _cache_index
     if _cache_index is None:
         _cache_index = _build_cache_index()
@@ -47,25 +58,28 @@ def _get_cache_index() -> dict[str, list[CacheEntry]]:
 def operator_llm(node: cst.FunctionDef) -> Iterable[cst.FunctionDef]:
     """Yield LLM-generated mutations for a function.
 
-    Looks up pre-generated mutations by source hash. Merges mutations from
-    all cached models, deduplicated by mutated_code.
+    Looks up pre-generated mutations by source hash via Library.query().
+    Returns nothing when no Library is configured or no entries match.
     """
+    if _library is None:
+        return
+
     func_source = cst.Module(body=[node]).code
     src_hash = source_hash(func_source)
 
-    index = _get_cache_index()
-    entries = index.get(src_hash, [])
+    entries = _library.query(src_hash)
     if not entries:
         return
 
     func_name = node.name.value
     seen: set[str] = set()
     for entry in entries:
-        for cached in entry.mutations:
-            if cached.mutated_code in seen:
+        for mutation in entry.mutations:
+            code = mutation["mutated_code"]
+            if code in seen:
                 continue
-            seen.add(cached.mutated_code)
-            mutated_node = _parse_mutation(cached.mutated_code, func_name)
+            seen.add(code)
+            mutated_node = _parse_mutation(code, func_name)
             if mutated_node is not None:
                 yield mutated_node
 

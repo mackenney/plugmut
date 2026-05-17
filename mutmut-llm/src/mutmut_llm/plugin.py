@@ -22,11 +22,11 @@ import libcst as cst
 from mutmut.hookspecs import hookimpl
 from mutmut.node_mutation import OPERATORS_TYPE
 
-from mutmut_llm.cache import list_cache_entries
+from mutmut_llm.cache import CacheEntry, list_cache_entries
 from mutmut_llm.config import LLMConfig
 from mutmut_llm.config import load_config
 from mutmut_llm.pricing import format_cost
-from mutmut_llm.operators import _reset_cache_index
+from mutmut_llm.operators import _reset_cache_index, set_library
 from mutmut_llm.operators import operator_llm
 from mutmut_llm.reporting import format_run_summary
 from mutmut_llm.storage import MutantResult
@@ -107,10 +107,13 @@ def _llm_mutation_count_by_function() -> dict[str, int]:
 def mutmut_configure(config: object) -> None:
     global _llm_config, _mutmut_paths, _current_run
     _llm_mutant_names.clear()
-    _reset_cache_index()
+    _reset_cache_index()  # resets both legacy index and _library
     _llm_config = load_config()
+    from mutmut_llm.library import Library
+
+    set_library(Library())  # base_dir=cwd; step-06 will thread proper base_dir
     if hasattr(config, "paths_to_mutate"):
-        _mutmut_paths = [str(p) for p in config.paths_to_mutate]
+        _mutmut_paths = [str(p) for p in getattr(config, "paths_to_mutate")]  # noqa: B009
     _current_run = new_run()
 
 

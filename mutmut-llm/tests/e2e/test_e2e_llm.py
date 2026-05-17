@@ -26,7 +26,7 @@ from mutmut.__main__ import (
 )
 from mutmut.plugin_manager import reset_plugin_manager
 
-from mutmut_llm.cache import list_cache_entries, source_hash
+from mutmut_llm.cache import list_cache_entries
 from mutmut_llm.config import load_config
 from mutmut_llm.operators import _reset_cache_index
 from mutmut_llm.pipeline import run_generation
@@ -58,14 +58,17 @@ def _clean_e2e_state():
 
     mutants_path = E2E_PROJECT / "mutants"
     cache_path = E2E_PROJECT / ".mutmut-cache"
+    lib_path = E2E_PROJECT / ".plugmut-llm"
     shutil.rmtree(mutants_path, ignore_errors=True)
     shutil.rmtree(cache_path, ignore_errors=True)
+    shutil.rmtree(lib_path, ignore_errors=True)
 
     yield
 
     _reset_cache_index()
     shutil.rmtree(mutants_path, ignore_errors=True)
     shutil.rmtree(cache_path, ignore_errors=True)
+    shutil.rmtree(lib_path, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +222,7 @@ class TestOperatorIntegration:
         fibonacci: 3 mutations, all killed by existing tests.
         is_palindrome: 3 mutations — strip-removal survives, other two killed.
         """
-        from mutmut_llm.cache import CacheEntry, CachedMutation, write_cache_entry
+        from mutmut_llm.library import Library
 
         source = E2E_SRC.read_text()
         module = cst.parse_module(source)
@@ -235,97 +238,47 @@ class TestOperatorIntegration:
         assert "fibonacci" in func_sources, "fibonacci not found in e2e source"
         assert "is_palindrome" in func_sources, "is_palindrome not found in e2e source"
 
-        fib_entry = CacheEntry(
+        lib = Library(base_dir=E2E_PROJECT)
+        lib.add(
             function_name="fibonacci",
             file_path="src/tiny/__init__.py",
-            source_hash=source_hash(func_sources["fibonacci"]),
+            source=func_sources["fibonacci"],
             mutations=[
-                CachedMutation(
-                    mutated_code='''\
-def fibonacci(n):
-    """Return the nth Fibonacci number."""
-    if n <= 0:
-        return 0
-    if n == 1:
-        return 0
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return b
-''',
-                    description="change fib(1) base case from 1 to 0",
-                ),
-                CachedMutation(
-                    mutated_code='''\
-def fibonacci(n):
-    """Return the nth Fibonacci number."""
-    if n < 0:
-        return 0
-    if n == 1:
-        return 1
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return b
-''',
-                    description="boundary: n < 0 instead of n <= 0",
-                ),
-                CachedMutation(
-                    mutated_code='''\
-def fibonacci(n):
-    """Return the nth Fibonacci number."""
-    if n <= 0:
-        return 0
-    if n == 1:
-        return 1
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return a
-''',
-                    description="return wrong accumulator: return a instead of b",
-                ),
+                {
+                    "mutated_code": 'def fibonacci(n):\n    """Return the nth Fibonacci number."""\n    if n <= 0:\n        return 0\n    if n == 1:\n        return 0\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n',
+                    "description": "change fib(1) base case from 1 to 0",
+                },
+                {
+                    "mutated_code": 'def fibonacci(n):\n    """Return the nth Fibonacci number."""\n    if n < 0:\n        return 0\n    if n == 1:\n        return 1\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n',
+                    "description": "boundary: n < 0 instead of n <= 0",
+                },
+                {
+                    "mutated_code": 'def fibonacci(n):\n    """Return the nth Fibonacci number."""\n    if n <= 0:\n        return 0\n    if n == 1:\n        return 1\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return a\n',
+                    "description": "return wrong accumulator",
+                },
             ],
             model="test-manual",
         )
-        write_cache_entry(fib_entry, base_dir=E2E_PROJECT)
-
-        pal_entry = CacheEntry(
+        lib.add(
             function_name="is_palindrome",
             file_path="src/tiny/__init__.py",
-            source_hash=source_hash(func_sources["is_palindrome"]),
+            source=func_sources["is_palindrome"],
             mutations=[
-                CachedMutation(
-                    mutated_code='''\
-def is_palindrome(s):
-    """Check if a string is a palindrome (case-insensitive)."""
-    cleaned = s.lower()
-    return cleaned == cleaned[::-1]
-''',
-                    description="remove strip() call — no whitespace handling",
-                ),
-                CachedMutation(
-                    mutated_code='''\
-def is_palindrome(s):
-    """Check if a string is a palindrome (case-insensitive)."""
-    cleaned = s.strip()
-    return cleaned == cleaned[::-1]
-''',
-                    description="remove lower() — case-sensitive comparison",
-                ),
-                CachedMutation(
-                    mutated_code='''\
-def is_palindrome(s):
-    """Check if a string is a palindrome (case-insensitive)."""
-    cleaned = s.lower().strip()
-    return cleaned != cleaned[::-1]
-''',
-                    description="logic inversion: != instead of ==",
-                ),
+                {
+                    "mutated_code": 'def is_palindrome(s):\n    """Check if a string is a palindrome (case-insensitive)."""\n    cleaned = s.lower()\n    return cleaned == cleaned[::-1]\n',
+                    "description": "remove strip()",
+                },
+                {
+                    "mutated_code": 'def is_palindrome(s):\n    """Check if a string is a palindrome (case-insensitive)."""\n    cleaned = s.strip()\n    return cleaned == cleaned[::-1]\n',
+                    "description": "remove lower()",
+                },
+                {
+                    "mutated_code": 'def is_palindrome(s):\n    """Check if a string is a palindrome (case-insensitive)."""\n    cleaned = s.lower().strip()\n    return cleaned != cleaned[::-1]\n',
+                    "description": "logic inversion",
+                },
             ],
             model="test-manual",
         )
-        write_cache_entry(pal_entry, base_dir=E2E_PROJECT)
 
     def _run_mutmut(self) -> dict[str, int | None]:
         """Run mutmut on the e2e project with plugins enabled."""
