@@ -1,13 +1,13 @@
 # mutmut-llm
 
-LLM-powered mutation operator for [plugmut]({{REPO_URL}}).
+LLM-powered mutation operator for [plugmut](https://github.com/mackenney/plugmut).
 
 Generates semantically sophisticated code mutations using Claude. API costs are incurred only during the explicit generation phase, not during test execution.
 
 ## Installation
 
 ```bash
-pip install mutmut-llm
+pip install plugmut-llm
 ```
 
 Requires an Anthropic API key:
@@ -83,8 +83,10 @@ The system prompt and per-file context are structured to enable Anthropic prompt
 
 ## Documentation
 
-See [SPEC.md]({{REPO_URL}}/blob/main/mutmut-llm/SPEC.md) for detailed contracts, validation pipeline, cost tracking, and known limitations.
+See [SPEC.md](https://github.com/mackenney/plugmut/blob/main/mutmut-llm/SPEC.md) for detailed contracts, validation pipeline, cost tracking, and known limitations.
 
 ## License
 
-{{LICENSE}}
+MIT License. See [LICENSE](LICENSE).
+
+Built on [plugmut](https://github.com/mackenney/mutmut) (a fork of [mutmut](https://github.com/boxed/mutmut) by Anders Hovmöller). The core mutation engine is the original author's work; this plugin is by Ignacio Mackenney.

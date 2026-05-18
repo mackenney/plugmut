@@ -1,13 +1,13 @@
 # mutmut-dedup
 
-Structural and bytecode deduplication for [plugmut]({{REPO_URL}}).
+Structural and bytecode deduplication for [plugmut](https://github.com/mackenney/plugmut).
 
 Reduces mutation testing time by eliminating redundant mutations before test execution — mutations that would produce the same observable behavior as each other or as the original code.
 
 ## Installation
 
 ```bash
-pip install mutmut-dedup
+pip install plugmut-dedup
 ```
 
 ## Usage
@@ -77,4 +77,6 @@ See [SPEC.md](SPEC.md) for detailed equivalence definitions and behavioral invar
 
 ## License
 
-{{LICENSE}}
+MIT License. See [LICENSE](LICENSE).
+
+Built on [plugmut](https://github.com/mackenney/mutmut) (a fork of [mutmut](https://github.com/boxed/mutmut) by Anders Hovmöller). The core mutation engine is the original author's work; this plugin is by Ignacio Mackenney.

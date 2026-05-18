@@ -1,20 +1,18 @@
 [project]
-name = "mutmut-dedup"
-version = "0.1.0"
-description = "Structural deduplication plugin for mutmut"
+name = "plugmut-dedup"
+version = "0.0.1"
+description = "Structural deduplication plugin for plugmut"
 requires-python = ">=3.10"
 readme = "README.md"
-# Recommended: BSD-3-Clause — update {{LICENSE}} when decided
-license = "BSD-3-Clause"
+license = "MIT"
 authors = [
-    # email: {{AUTHOR_EMAIL}}
-    { name = "{{AUTHOR_NAME}}", email = "todo@example.com" },
+    { name = "Ignacio Mackenney", email = "mackenney92@gmail.com" },
 ]
 keywords = ["mutation testing", "deduplication", "testing", "mutations", "libcst"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -31,9 +29,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "{{REPO_URL}}"
-Repository = "{{REPO_URL}}"
-Issues = "{{REPO_URL}}/issues"
+Homepage = "https://github.com/mackenney/plugmut"
+Repository = "https://github.com/mackenney/plugmut"
+Issues = "https://github.com/mackenney/plugmut/issues"
 
 [project.entry-points.plugmut]
 dedup = "mutmut_dedup.plugin"

@@ -1,6 +1,6 @@
 # mutmut-extras
 
-Extra mutation operators for [plugmut]({{REPO_URL}}).
+Extra mutation operators for [plugmut](https://github.com/mackenney/plugmut).
 
 mutmut-extras registers 19 additional mutation operators into plugmut, targeting AST patterns
 the built-in operator set does not cover. Each operator is independently composable with other
@@ -9,7 +9,7 @@ plugin packages and activates automatically on installation.
 ## Installation
 
 ```bash
-pip install mutmut-extras
+pip install plugmut-extras
 ```
 
 The plugin registers automatically via plugmut's entry-point system — no configuration needed.
@@ -50,8 +50,10 @@ plugmut run
 
 See [SPEC.md](SPEC.md) for detailed operator contracts, behavioral invariants, and known limitations.
 
-Source repository: {{REPO_URL}}
+Source repository: https://github.com/mackenney/plugmut
 
 ## License
 
-{{LICENSE}}
+MIT License. See [LICENSE](LICENSE).
+
+Built on [plugmut](https://github.com/mackenney/mutmut) (a fork of [mutmut](https://github.com/boxed/mutmut) by Anders Hovmöller). The core mutation engine is the original author's work; this plugin is by Ignacio Mackenney.
