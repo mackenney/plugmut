@@ -48,5 +48,5 @@ If upstream modifies `_create_mutations()`:
 ```bash
 grep -q "Operator.*raised on" mutmut/src/mutmut/file_mutation.py
 grep -q "mutated_node is node" mutmut/src/mutmut/file_mutation.py
-uv run --package mutmut pytest mutmut/tests/ -x -q
+uv run --package plugmut pytest mutmut/tests/ -x -q
 ```

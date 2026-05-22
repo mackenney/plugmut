@@ -35,5 +35,5 @@ patch may conflict. Resolution:
 ## Verification
 
 ```bash
-uv run --package mutmut pytest mutmut/tests/e2e/ -x
+uv run --package plugmut pytest mutmut/tests/e2e/ -x
 ```

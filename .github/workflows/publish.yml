@@ -21,9 +21,9 @@ jobs:
       matrix:
         package:
           - mutmut
-          - mutmut-extras
-          - mutmut-llm
-          - mutmut-dedup
+          - plugmut-extras
+          - plugmut-llm
+          - plugmut-dedup
     steps:
       - uses: actions/checkout@v5
         with:

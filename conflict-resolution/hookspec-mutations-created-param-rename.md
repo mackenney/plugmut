@@ -31,9 +31,9 @@ The rename must be applied simultaneously to both the hookspec and all plugin im
 
 ## Corresponding Plugin Changes
 
-- `mutmut-llm/src/mutmut_llm/plugin.py` — `mutmut_mutations_created` updated to use
+- `plugmut-llm/src/mutmut_llm/plugin.py` — `mutmut_mutations_created` updated to use
   `source_tag_by_mutant_name`
-- `mutmut-llm/tests/test_plugin.py` — tests updated
+- `plugmut-llm/tests/test_plugin.py` — tests updated
 
 ## How to Resolve Upstream Conflicts
 
@@ -42,9 +42,9 @@ If upstream mutmut adds changes to `mutmut_mutations_created`:
 1. Accept upstream changes in `mutmut/src/mutmut/hookspecs.py`
 2. Ensure the parameter name in the hookspec stays `source_tag_by_mutant_name`
    (or rename again if upstream chose a different name)
-3. Update all plugin implementations (`mutmut-llm/plugin.py`, `mutmut-extras` if applicable)
+3. Update all plugin implementations (`plugmut-llm/plugin.py`, `plugmut-extras` if applicable)
    to match the hookspec parameter name exactly
-4. Run `uv run --package mutmut pytest mutmut/tests/` and `uv run --package mutmut-llm pytest`
+4. Run `uv run --package plugmut pytest mutmut/tests/` and `uv run --package plugmut-llm pytest`
    to confirm no hook dispatch errors
 
 ## Submodule Pointer

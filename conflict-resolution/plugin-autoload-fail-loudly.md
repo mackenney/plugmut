@@ -32,5 +32,5 @@ If upstream modifies the exception handling in `get_plugin_manager()`:
 ## Verification
 
 ```bash
-uv run --package mutmut pytest mutmut/tests/ -x -q
+uv run --package plugmut pytest mutmut/tests/ -x -q
 ```

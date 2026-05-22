@@ -10,6 +10,9 @@ dependencies = [
     "plugmut-dedup",
 ]
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [tool.uv.sources]
 plugmut = { workspace = true }
 plugmut-extras = { workspace = true }
@@ -17,16 +20,41 @@ plugmut-llm = { workspace = true }
 plugmut-dedup = { workspace = true }
 
 [tool.uv.workspace]
-members = ["mutmut", "mutmut-extras", "mutmut-llm", "mutmut-dedup"]
+members = ["mutmut", "plugmut-extras", "plugmut-llm", "plugmut-dedup"]
 exclude = ["mutmut/e2e_projects/*"]
 
-[tool.basedpyright]
-typeCheckingMode = "basic"
-venvPath = "."
-venv = ".venv"
-pythonVersion = "3.13"
-exclude = [
-    ".claude/worktrees/**",
-    "mutmut/e2e_projects/**",
-    "**/.git/**",
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    "mutmut/docs/_themes/",
+    "mutmut/docs/conf.py",
+    "mutmut/e2e_projects/",
+    "mutmut/tests/data/test_generation/",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "C4", "UP", "I"]
+ignore = [
+    "E501",  # line too long - handled by formatter
+    "B007",  # unused loop control variable
+    "B018",  # useless expression
+    "B024",  # abstract base class without abstract methods
+    "B027",  # empty method in abstract base class without abstract decorator
+    "B028",  # no explicit stacklevel in warnings.warn
+    "B904",  # raise without from in except
+    "C405",  # unnecessary list literal
+    "C408",  # unnecessary dict() call
+    "C416",  # unnecessary list comprehension
+    "F402",  # import shadowed by loop variable
+    "F841",  # local variable assigned but never used
+    "UP007", # use X | Y for type annotations
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.34",
 ]

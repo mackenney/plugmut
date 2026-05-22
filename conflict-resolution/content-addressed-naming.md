@@ -35,7 +35,7 @@ identification, and how plugins identify their own mutations via
 ### `mutmut/src/mutmut/normalize.py` (new)
 
 Added `normalize_path()` and `compute_mutant_hash()` alongside the normalization
-primitives already shared with `mutmut-dedup`.
+primitives already shared with `plugmut-dedup`.
 
 ### `mutmut/src/mutmut/file_mutation.py`
 
@@ -51,7 +51,7 @@ If upstream modifies `function_trampoline_arrangement()`:
 3. Ensure the naming loop builds `occurrence_counts` keyed on `(norm_original, norm_mutated)`.
 4. Ensure `compute_mutant_hash()` from `normalize.py` is used.
 5. Name format uses double underscore: `{mangled_name}__{hash}` (12 hex chars).
-6. Update e2e snapshots after any change: `uv run --package mutmut pytest mutmut/tests/e2e/ --inline-snapshot=fix`.
+6. Update e2e snapshots after any change: `uv run --package plugmut pytest mutmut/tests/e2e/ --inline-snapshot=fix`.
 
 ## Verification
 
@@ -59,6 +59,6 @@ If upstream modifies `function_trampoline_arrangement()`:
 test -f mutmut/src/mutmut/normalize.py
 grep -q "compute_mutant_hash" mutmut/src/mutmut/normalize.py
 grep -q "hash_suffix" mutmut/src/mutmut/file_mutation.py
-uv run --package mutmut pytest mutmut/tests/ -x -q
-uv run --package mutmut pytest mutmut/tests/e2e/ -x -q
+uv run --package plugmut pytest mutmut/tests/ -x -q
+uv run --package plugmut pytest mutmut/tests/e2e/ -x -q
 ```

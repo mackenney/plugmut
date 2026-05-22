@@ -37,5 +37,5 @@ If upstream code tries to mutate Config fields post-creation:
 
 ```bash
 grep -q 'frozen=True' mutmut/src/mutmut/__main__.py
-uv run --package mutmut pytest mutmut/tests/ -x -q
+uv run --package plugmut pytest mutmut/tests/ -x -q
 ```

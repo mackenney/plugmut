@@ -27,8 +27,8 @@ def _disable_plugin_autoload():
 
 ## Why
 
-This workspace installs `mutmut-extras` as a sibling package. Because
-`mutmut-extras` registers a pluggy entry point under the `plugmut` group,
+This workspace installs `plugmut-extras` as a sibling package. Because
+`plugmut-extras` registers a pluggy entry point under the `plugmut` group,
 `get_plugin_manager()` loads it automatically via `load_setuptools_entrypoints`.
 
 The extras plugin adds mutation operators (`return None`, slice removal, etc.)
@@ -71,8 +71,8 @@ directly. Resolution:
 
 ```bash
 # Core tests pass without plugin contamination
-uv run --package mutmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x
+uv run --package plugmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x
 
 # Extras tests still load the plugin (no conftest blocking them)
-uv run --package mutmut-extras pytest mutmut-extras/tests/ -x
+uv run --package plugmut-extras pytest plugmut-extras/tests/ -x
 ```

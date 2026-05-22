@@ -47,5 +47,5 @@ If upstream adds their own whole-function mutation support, drop this patch.
 ## Verification
 
 ```bash
-uv run --package mutmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x
+uv run --package plugmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x
 ```

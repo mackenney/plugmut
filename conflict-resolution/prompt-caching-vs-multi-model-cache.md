@@ -2,7 +2,7 @@
 
 ## Branch summary
 
-Both branches fork from the same point on main and modify overlapping files in `mutmut-llm/`.
+Both branches fork from the same point on main and modify overlapping files in `plugmut-llm/`.
 
 **feat/prompt-caching** — Adds Anthropic prompt caching to reduce API costs.
 - Restructures system prompt into content blocks with `cache_control`
@@ -183,12 +183,12 @@ These are orthogonal but live in the same function body.
 ## Verification
 
 ```bash
-# After merge, run all mutmut-llm tests
-uv run --package mutmut-llm pytest mutmut-llm/tests/ -v
+# After merge, run all plugmut-llm tests
+uv run --package plugmut-llm pytest plugmut-llm/tests/ -v
 
 # Run live e2e tests if API key available
-PLUGMUT_LLM_E2E_LIVE=1 uv run --package mutmut-llm pytest mutmut-llm/tests/e2e/test_e2e_live.py -v
+PLUGMUT_LLM_E2E_LIVE=1 uv run --package plugmut-llm pytest plugmut-llm/tests/e2e/test_e2e_live.py -v
 
 # Ensure core mutmut tests unaffected
-uv run --package mutmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x
+uv run --package plugmut pytest mutmut/tests/ --ignore=mutmut/tests/e2e -x
 ```
