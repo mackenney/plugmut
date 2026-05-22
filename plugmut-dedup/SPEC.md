@@ -52,6 +52,8 @@ Two mutated nodes `A` and `B` at the same site are structurally equivalent if an
 - Converts `x: T = v` (annotated assignment with value) into `x = v`
 - Drops `x: T` (annotation-only, no value) entirely
 
+**Step 4a — Location fixup**: Call `ast.fix_missing_locations(tree)` to populate missing line/column metadata on nodes introduced by the transformer. Required for `ast.dump` to complete without error.
+
 **Step 5 — Canonical dump**: Produce `ast.dump(tree, annotate_fields=True, include_attributes=False)`. This excludes line numbers and column offsets.
 
 **Fallback chain** (when any step above fails):
@@ -60,6 +62,8 @@ Two mutated nodes `A` and `B` at the same site are structurally equivalent if an
 3. If Step 3 (`ast.parse`) raises `SyntaxError`: return the stripped source text from Step 2 as the normalized form (no AST processing).
 
 Fallback normalized forms MUST NOT be considered equivalent to any other form unless they are byte-identical strings.
+
+**Shared primitive:** `normalize_mutation()` is imported from `mutmut.normalize` (not defined in this package). The same function is used by mutmut core's content-addressed naming. This ensures that mutations deduplicated by Phase 1 have the same normalized form as used for mutant naming.
 
 **What Phase 1 ignores**: whitespace, indentation, quote style (single vs. double), comments, type annotations.
 
@@ -219,7 +223,7 @@ The set of mutations removed by mutmut-dedup is allowed to differ between CPytho
 
 3. **Annotation-only statements normalize identically.** An `x: int` (no value) statement normalizes to an empty AST dump (`Module(body=[], type_ignores=[])`). Any two annotation-only mutations at the same site are deduplicated to the first. This is correct only if annotation-only statements have no runtime effect.
 
-4. **`libcst` undeclared as a direct dependency.** `pyproject.toml` declares only `mutmut>=3.5.0` and `pluggy>=1.5.0`. `libcst` is available transitively through `mutmut` but is not declared directly. A standalone installation without `mutmut` would produce an `ImportError`.
+4. **`libcst` is a transitive dependency through `plugmut`.** As of the current release, `libcst>=1.8.5` is declared as a direct dependency in `pyproject.toml` alongside `plugmut>=4.0.0` and `pluggy>=1.5.0`. Standalone installation without `plugmut` would still produce an `ImportError` since the `mutmut.normalize` module is required.
 
 5. **Phase 2 recompiles the containing function for every mutation.** For a function with N mutations, Phase 2 performs N+1 compilations (N mutated + 1 original). No cross-mutation caching is performed.
 
@@ -233,30 +237,16 @@ The set of mutations removed by mutmut-dedup is allowed to differ between CPytho
 
 3. **What is the long-term strategy for module-level mutations?** Phase 2 conservatively skips all module-level mutations. Should bytecode-equivalent module-level mutations (e.g., `x = 2 * 3` vs `x = 6`) ever be removed, or is the current conservatism permanent?
 
-4. **Suspicious tolerance in `test_no_duplicates_same_count`.** The test asserts `len(mutations_with_dedup) >= count_before - 1` instead of `== count_before` for a source with no expected duplicates (`x = 1\n`). The `-1` tolerance is unexplained. See B2 below.
-
 ## Bugs / Inconsistencies Observed
 
-### B1. `libcst` undeclared direct dependency
-
-`mutmut-dedup/pyproject.toml` lists only `mutmut>=3.5.0` and `pluggy>=1.5.0`. `libcst` is imported in `normalize.py` and `bytecode.py`. An installation of `mutmut-dedup` without `mutmut` would fail on import with no clear diagnostic.
-
-### B2. Unexplained tolerance in `test_no_duplicates_same_count`
-
-The e2e test asserts `len(mutations_with_dedup) >= count_before - 1` instead of `== count_before`. The source (`x = 1\n`) contains no expected duplicates, so deduplication should produce no change. The `-1` tolerance may mask a Phase 2 bug (a module-level mutation being incorrectly removed) or a known Phase 1 edge case that has not been documented. Until resolved, this test does not fully verify the no-duplicates invariant.
-
-### B3. Phase 1 and Phase 2 cross-site key asymmetry
+### B1. Phase 1 and Phase 2 cross-site key asymmetry
 
 Phase 1 uses only `id(original_node)` as the dedup key. Phase 2 uses `(id(original_node), id(containing_function), mut_sig)`. This asymmetry means Phase 2 can deduplicate two mutations at the same site that target the same function and produce the same compiled output, even if their `mutated_node` values differ at the CST level. This is the correct semantics but is not documented and may surprise contributors.
 
-### B4. Orphaned-node guard may be dead code
+### B2. Orphaned-node guard may be dead code
 
 The Phase 2 implementation checks `if mutated_func is func` to detect when `deep_replace` failed to locate the mutation site and returned the original node unchanged. The code comment asserts libcst returns the same object identity when no replacement is made. If this assumption is wrong (i.e., libcst always returns a new object even when no replacement occurs), the guard never fires. In that scenario, orphaned mutations would proceed to signature comparison, and since `orig_source == mut_source`, they would be removed as original-equivalent — a false positive. The correctness of the guard depends on undocumented libcst behavior.
 
-### B5. Test class docstring stated wrong version boundary
-
-`TestCPythonOptimizerBehavior`'s class docstring previously referred to "CPython 3.14" as the folding boundary. This was incorrect; the boundary is CPython 3.13. The docstring has been updated. The parametrize cases carry explicit `expected` booleans documenting per-case behavior.
-
-### B6. Phase 1 propagates `AttributeError` from `m.original_node`
+### B3. Phase 1 propagates `AttributeError` from `m.original_node`
 
 Phase 2 catches `AttributeError` during reconstruction and conservatively keeps the mutation. Phase 1's `id(m.original_node)` access does not have equivalent protection. If a mutation object raises on `original_node` access, Phase 1 propagates the exception to the caller. This asymmetry is not documented.

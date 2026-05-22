@@ -69,11 +69,11 @@ API key must be set via the `ANTHROPIC_API_KEY` environment variable. Setting `a
 
 ## Caching
 
-- Cache stored in `.mutmut-cache/llm/` relative to the project root
+- Cache entries stored in `.plugmut-llm/entries/` relative to the project root
 - Entries keyed by source hash — refactored functions automatically get new mutations
 - Two functions with identical source bodies share cache entries
 - Cache never expires automatically; entries accumulate until manually cleared
-- Clear with: `rm -rf .mutmut-cache/llm/`
+- Clear with: `rm -rf .plugmut-llm/`
 
 Run history is stored under `.mutmut-cache/llm/runs/` and is not removed by cache clears.
 

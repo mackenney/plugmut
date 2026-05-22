@@ -9,7 +9,7 @@ Added 6 hook specifications to `mutmut/src/mutmut/hookspecs.py`:
 - `mutmut_filter_mutations(filename, mutations)` — called after mutation generation
 - `mutmut_post_test(mutant_name, exit_code, status, duration)` — called after each test result
 - `mutmut_post_run(source_file_mutation_data)` — called after all tests complete
-- `mutmut_mutations_created(filename, source_by_mutant_name)` — called after mutations are written
+- `mutmut_mutations_created(filename, source_tag_by_mutant_name)` — called after mutations are written
 
 ## Hook call sites patched
 

@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Async generation with configurable concurrency (`min_concurrency`, `max_concurrency`)
 - Exponential backoff retry with jitter for transient API errors
 - Error classification: RETRY, SKIP, and STOP actions for different failure modes
-- Persistent JSON cache under `.mutmut-cache/llm/` with source-hash-based invalidation
+- Persistent JSON cache under `.plugmut-llm/entries/` with source-hash-based invalidation
 - Two-phase design: explicit `generate` phase writes cache; operator phase reads it without API calls
 - Per-model cache entries — multiple models coexist for the same function
 - Three-stage validation pipeline for generated mutations: syntax, import guard, pragma guard

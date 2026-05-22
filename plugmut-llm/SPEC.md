@@ -66,8 +66,9 @@ tracking, and post-run reporting.
 - Generated mutations MUST pass the validation pipeline before being cached.
 - Mutations that fail validation MUST NOT be written to cache.
 - Successfully cached entries MUST contain at least: `function_name`, `file_path`,
-  `source_hash`, `mutations`, `model`, `cost_usd`, `input_tokens`, `output_tokens`,
-  `generated_at`.
+  `source_hash`, `mutations`, `model`. Cost and token data (`cost_usd`, `input_tokens`,
+  `output_tokens`, `cache_creation_tokens`, `cache_read_tokens`) are stored inside a
+  `metadata` dict on the entry.
 - Functions already cached for the active model MUST be skipped (no API call made).
 - When `enabled = false`, MUST return 0 and make no API calls.
 - When `api_key` is empty and `dry_run` is false, MUST return 0 and report the missing key.
@@ -121,10 +122,10 @@ explicitly.
 
 ### Cache structure
 
-- Cache entries are stored as JSON files under `.mutmut-cache/llm/` relative to the project
+- Cache entries are stored as JSON files under `.plugmut-llm/entries/` relative to the project
   root (or a configurable `base_dir`).
 - Run history files are stored under `.mutmut-cache/llm/runs/`. These are a separate namespace.
-- `clear_cache()` removes all cache entry JSON files. It does NOT remove run history files.
+- `clear_cache()` removes all cache entry JSON files from `.plugmut-llm/entries/`. It does NOT remove run history files.
 
 ### Write safety
 
@@ -137,16 +138,11 @@ explicitly.
 
 ### Cache key scheme
 
-- A cache entry filename is deterministic from `(file_path, function_name, source_hash, model)`.
-- Model-specific entries use 4 segments separated by `__`.
-- Legacy (no-model) entries use 3 segments.
-- `file_path` path separators are normalized in the filename.
-- Model names are encoded such that the `__` segment delimiter is unambiguous. The encoding is
-  stable and deterministic.
-- **Known bug:** `function_name` is NOT encoded. A function name containing `__` (including
-  `__init__`) produces a key with an ambiguous delimiter. Two different `(file_path,
-  function_name)` pairs can produce identical filenames. Example: `file_path="a"`,
-  `function_name="b__c"` and `file_path="a__b"`, `function_name="c"` yield the same key.
+- A cache entry filename is deterministic from `(file_path, function_name, source_hash, model)` and is
+  computed as `sha256("\0".join([file_path, function_name, source_hash, model]).encode()).hexdigest()[:32] + ".json"`. 
+  The null-byte separator eliminates delimiter ambiguity; no encoding of individual components is required.
+- `file_path` path separators are normalized before hashing.
+- Each `(function_identity, model_name)` pair has a unique, collision-resistant file.
 
 ### Class method naming
 
@@ -157,12 +153,8 @@ class methods.
 
 ### Cache hit/miss semantics
 
-- A cache hit requires an exact match on `source_hash` AND `model`.
-- A lookup with `model=None` matches any entry for `(file_path, function_name, source_hash)`.
-  If multiple model entries exist, the entry with the alphabetically-first model name (after
-  encoding) is returned. Callers SHOULD NOT rely on which model entry is returned when multiple
-  exist.
-- A lookup that finds an entry whose stored `source_hash` differs from the requested hash MUST
+- A cache entry is found by computing the deterministic filename for the `(file_path, function_name, source_hash, model)` tuple.
+- A lookup that finds a file but whose stored `source_hash` differs from the requested hash MUST
   return a miss. The stored entry MUST NOT be returned.
 - Corrupt or unparseable cache files MUST be silently skipped; they MUST NOT cause an error.
 - If a cache file is deleted between discovery and read, the entry MUST be treated as a miss.
@@ -171,16 +163,6 @@ class methods.
 
 - Entries for different models for the same function MUST coexist as separate files.
 - Writing an entry for model A MUST NOT affect model B's entry for the same function.
-- Legacy (no-model) entries and model-specific entries MAY coexist.
-
-### Backwards compatibility
-
-- Entries written without a model field (3-segment filename) MUST be readable by
-  `list_cache_entries` and `read_cache_entry(model=None)`.
-- `read_cache_entry(model="some-model")` MUST NOT match legacy 3-segment files.
-- `CacheEntry.from_dict` MUST tolerate missing optional fields (`model`, `cost_usd`,
-  `input_tokens`, `output_tokens`, `cache_creation_tokens`, `cache_read_tokens`,
-  `generated_at`) by substituting zero/empty defaults.
 
 ### Source hash computation
 
@@ -200,8 +182,8 @@ causes immediate rejection without running subsequent stages.
 2. **Import guard**: all module names imported anywhere in `mutated_code` (at any nesting
    level, including inside functions, classes, and conditionals) are compared against all
    module names imported anywhere in `original_code`. If `mutated_code` imports any top-level
-   module name not present in `original_code`, the mutation is rejected. Top-level name
-   extraction: `import os.path` → `"os"`, `from os import path` → `"os"`. If `original_code`
+   module name not present in `original_code`, the mutation is rejected. Full module name
+   extraction: `import os.path` → `"os.path"`, `from os import path` → `"os"`. If `original_code`
    fails to parse, its import set is treated as empty, causing any mutation that contains
    imports to be rejected.
 
@@ -282,13 +264,6 @@ LLM API errors are classified into three actions:
 - When the cancel event is set before a call begins, MUST return an empty result without making
   an API call.
 
-### Sync generation path (backward compatibility)
-
-A synchronous generation path exists alongside the async path. It catches ALL exceptions and
-returns an empty result with a warning. It does NOT classify errors, does NOT retry, and does
-NOT propagate STOP signals. A quota-exceeded error on the sync path is silently treated as a
-per-target miss. This divergence is a known bug; see Bugs / Inconsistencies Observed.
-
 ## Concurrency Contract
 
 ### Concurrency level
@@ -325,6 +300,8 @@ per-target miss. This divergence is a known bug; see Bugs / Inconsistencies Obse
 |---|---|---|
 | `model` | `"claude-sonnet-4-6"` | Any string; affects cache key and cost calculation |
 | `max_mutations_per_function` | `5` | No range validation (see Bugs) |
+| `min_mutations_per_function` | `2` | No range validation |
+| `generator` | `"anthropic"` | LLM backend to use; currently only `"anthropic"` is supported |
 | `max_tokens` | `4096` | No minimum enforced |
 | `temperature` | `0.6` | `[0.0, 1.0]` — validated by `load_config` |
 | `enabled` | `True` | — |
@@ -367,8 +344,10 @@ mutmut-llm registers the following hooks:
   is incorrect.
 - **`mutmut_post_test(mutant_name, exit_code, status, duration)`**: records a mutant result,
   marking it `is_llm` if previously identified as LLM-generated.
-- **`mutmut_post_run(source_file_mutation_data)`**: writes the completed run to disk with
-  cumulative cost and token totals.
+- **`mutmut_post_run(source_file_mutation_data)`**: re-identifies LLM mutants by reading
+  `source_by_key` from each `SourceFileMutationData` entry (overriding the per-test `is_llm`
+  flag set by `mutmut_post_test`), then writes the completed run to disk with cumulative cost
+  and token totals.
 - **`mutmut_register_commands(cli_group)`**: registers `generate` and `llm-status` subcommands.
 
 ### Run storage
@@ -406,8 +385,11 @@ mutmut-llm registers the following hooks:
    text produces the same 64-bit hash prefix share cache entries. No collision detection is
    performed.
 4. **Deep mode only.** Targeting a specific function or diff-scoped subset is not supported.
-5. **Import guard does not detect namespace changes.** `from os import path` and `import os`
-   both normalize to `"os"`. A mutation substituting one for the other passes the import guard.
+5. **Import guard uses full dotted module names.** `import os.path` and `from os import path`
+   extract to different module names (`"os.path"` and `"os"` respectively). A mutation changing
+   `import os.path` to `from os import path` passes the guard since `"os"` is a subset of the
+   original's imports — but they access identifiers differently. Conversely, a mutation using
+   `import os.path` when the original only had `from os import path` is correctly rejected.
 6. **POSIX-only write safety.** The write-safety guarantee requires a POSIX filesystem with
    advisory locking support. Windows is unsupported.
 7. **Stale lock sidecar files.** After unclean process termination, lock sidecar files persist
@@ -437,36 +419,14 @@ mutmut-llm registers the following hooks:
 
 ## Bugs / Inconsistencies Observed
 
-1. **`mutmut_mutations_created` ignores `base_dir`** (`plugin.py`). Always reads cache from
-   `cwd/.mutmut-cache/llm/`. If generation used a custom `base_dir`, no LLM mutations are
-   identified during testing.
+1. **`mutmut_mutations_created` ignores `base_dir`** (`plugin.py`). Always uses the default
+   `Library()` (`base_dir=Path(".")`, entries at `.plugmut-llm/entries/`). If generation ran
+   with a custom `base_dir`, no LLM mutations are identified during testing.
 
 2. **`RunResult.total_llm_cost_usd` is cumulative, not per-run.** The field is on a per-run
    object but sums all cache entries ever written, not entries from the current run only.
 
-3. **Import guard does not distinguish access patterns.** `from os import path` and `import os`
-   both normalize to `"os"`. A mutation substituting one for the other passes the guard despite
-   changing how identifiers are accessed.
-
-4. **Sync generation path has divergent error handling.** The synchronous generation path
-   catches all exceptions and returns empty results — no error classification, no retry, no STOP
-   propagation. A quota-exceeded error on the sync path is silently treated as a per-target
-   miss. The async path classifies, retries, and propagates STOP correctly. Both paths exist and
-   are tested independently.
-
-5. **`generated_at` has no format contract.** Stored as a raw string. `load_latest_run` sorts
-   by `started_at` lexicographically; mixed timestamp formats across entries produce undefined
-   sort order.
-
-6. **Cache key collision via unsanitized function names.** Function names containing `__`
-   (including `__init__`) produce cache keys with ambiguous delimiters. `file_path="a"`,
-   `function_name="b__c"` and `file_path="a__b"`, `function_name="c"` produce identical keys.
-
-7. **Most constrained config fields not validated when loaded from pyproject.toml.**
+3. **Most constrained config fields not validated when loaded from pyproject.toml.**
    `min_concurrency`, `max_concurrency`, `max_retries`, `base_backoff_seconds`, and
    `request_timeout_seconds` constraints are only enforced at direct construction time. Invalid
    values in `pyproject.toml` are silently accepted.
-
-8. **`list_cache_entries` is not filtered by filename pattern.** Any `.json` file in the cache
-   root directory is attempted to be deserialized. Non-entry files silently fail and are
-   skipped, but the cache directory is not treated as private.

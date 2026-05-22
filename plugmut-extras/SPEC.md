@@ -5,7 +5,7 @@
 ## Purpose
 
 mutmut-extras is a plugin package that registers 19 additional mutation operators into a
-mutmut installation. It extends mutmut's built-in operator set by targeting AST patterns
+plugmut installation. It extends plugmut's built-in operator set by targeting AST patterns
 that the built-ins do not cover or deliberately skip. Each operator is independently
 activatable and independently composable with other plugin packages.
 
@@ -26,7 +26,7 @@ activatable and independently composable with other plugin packages.
 
 ## Plugin Contract
 
-mutmut-extras registers itself as a mutmut plugin via the `mutmut` entry-point group.
+mutmut-extras registers itself as a mutmut plugin via the `plugmut` entry-point group.
 When installed, it implements the `mutmut_register_operators` hook and returns a flat
 list of `(NodeType, callable)` tuples — one per operator function.
 
@@ -230,26 +230,19 @@ fixable within this package.
 **Non-goals:** Does not mutate parameters without defaults. Does not duplicate mutations
 already covered by built-in operators.
 
-**Known dead code path (not part of live contract):** The implementation contains a Case 3
-branch for compound or collection defaults (lists, tuples, calls) → `None`, but this
-branch is never reached through the normal mutation pipeline. See Bugs / Inconsistencies,
-B1.
-
 ---
 
 ### reverse_iteration
 
 **Trigger:** `cst.For` node where the iterable is not already a `reversed(...)` call.
-In libcst, `async for` loops are represented as `cst.For` nodes; the operator does NOT
-inspect the `asynchronous` attribute and therefore fires on both sync and async `for`
-loops. See Bug B4.
+In libcst, `async for` loops are represented as `cst.For` nodes with a non-None `asynchronous`
+attribute. The operator checks `node.asynchronous` and skips async `for` loops.
 
 **Output contract:** Yields exactly one mutation: the `for` node with the iterable wrapped
 in `reversed(iterable)`.
 
 **Non-goals:** Does not mutate the loop body or target variable. Does not add an import
-for `reversed` (it is a built-in). Does not handle any suppression of invalid `reversed()`
-wrapping on async iterables.
+for `reversed` (it is a built-in).
 
 ---
 
@@ -423,27 +416,22 @@ float, or string-literal defaults.
 
 ## Known Limitations / Accepted Trade-offs
 
-- **Duplicate pass mutations:** `void_call_removal` and `super_call_deletion` both produce
-  `pass` mutations for `super().method()` call sites, resulting in two `Mutation` objects
-  with the same `original_node` and structurally equivalent `mutated_node` in the pipeline.
-  Whether the core deduplicates them is outside this package's contract. See also Bug B2.
+- **`super().method()` handled exclusively by `super_call_deletion`:** `void_call_removal`
+  explicitly skips calls matching `super(...).method(...)` to avoid duplicate `pass` mutations.
+  Only `super_call_deletion` fires on these sites.
 
 - **exception_control_flow semantically invalid mutations:** `break`/`continue` mutations
   outside loops are libcst-valid but `ast.parse`-invalid, as documented in the
   Syntax Guarantee above. Accepted: the operator is scope-unaware by design.
 
-- **reverse_iteration fires on async for:** `cst.For` in libcst covers both sync and async
-  for loops. The operator wraps the async iterable with `reversed()`, producing a semantically
-  invalid mutation. Accepted as a known bug pending a fix. See Bug B4.
+- **reverse_iteration skips async for:** `cst.For` in libcst covers both sync and async for
+  loops. The operator guards `if node.asynchronous is not None: return` and skips async iterables.
 
 - **Decorated function exclusion:** `function_deletion` cannot fire on functions with
   non-safe decorators due to core-level skip logic. Not fixable in this package.
 
 - **No `isinstance` type-reduction:** Blocked by core's `NEVER_MUTATE_FUNCTION_CALLS` list.
   Explicitly deferred until core exposes an override mechanism.
-
-- **default_param_mutation Case 3 unreachable:** Compound-default mutation is dead code in
-  the normal pipeline. See Bug B1.
 
 ---
 
@@ -468,70 +456,15 @@ float, or string-literal defaults.
    attribute access from `super()`. `super().method().chained()` does not trigger. Should
    this be extended to match further-chained forms?
 
----
-
-## Bugs / Inconsistencies Observed
-
-### B1: default_param_mutation Case 3 is dead code in the normal pipeline
-
-**Severity:** Medium — silent dead code; misleading operator documentation.
-
-The core visitor skips `Param` nodes with compound or collection defaults before operators
-are applied. The `default_param_mutation` operator has a Case 3 branch (compound defaults
-→ `None`) that is never reached through `create_mutations`. Only Cases 1 and 2 are live.
-Unit tests calling the operator function directly mask the dead path. Users expecting
-`def f(x=list())` to be mutated to `def f(x=None)` will not see this mutation.
-
-**Fix:** Remove the dead branch and document the gap, or add a mechanism to bypass the
-core skip logic for this operator.
-
-### B2: void_call_removal and super_call_deletion produce duplicate mutations
-
-**Severity:** Low — inflates mutation counts.
-
-For `super().__init__(x)`, both operators match the `SimpleStatementLine` and independently
-yield a `pass` mutation, creating two `Mutation` objects with identical `original_node` and
-structurally equivalent `mutated_node`.
-
-**Fix:** Add a guard in `void_call_removal` to skip the `super().method()` form, narrow
-`super_call_deletion` to add semantics that differ from `void_call_removal`, or rely on
-mutmut-dedup to remove the duplicate at the pipeline level.
-
-### B3: exception_control_flow docstring claims mutations are filtered — incorrect
-
-**Severity:** Low — misleading documentation.
-
-The docstring states "Invalid variants (break outside loop) are filtered by mutmut's syntax
-validation." `break`/`continue` outside a loop fails at `compile()` time, not at libcst
-parse time. The core does not filter these; they pass through as valid mutants and are
-killed when the test runner attempts to import the mutated module.
-
-**Fix:** Update the docstring to state that the mutation is generated and killed at test
-time, not filtered at generation time.
-
-### B4: reverse_iteration fires on async for loops
-
-**Severity:** High — produces semantically invalid mutations.
-
-libcst uses `cst.For` for both `for` and `async for` loops (distinguished by the
-`asynchronous` attribute). The operator does not inspect `asynchronous` and fires
-unconditionally on all `cst.For` nodes. For `async for x in y:`, wrapping `y` with
-`reversed()` produces `async for x in reversed(y):`, which fails at runtime because
-`reversed()` does not accept async iterables.
-
-**Fix:** Add a guard: `if node.asynchronous is not None: return`.
-
----
-
 ## Acceptance Criteria
 
 ```
 # All unit tests pass
-uv run --package mutmut-extras pytest mutmut-extras/tests/ -q
+uv run --package plugmut-extras pytest plugmut-extras/tests/ -q
 
 # Verify Bug B4 is fixed (async for guard present)
-uv run --package mutmut-extras pytest mutmut-extras/tests/ -k "async" -v
+uv run --package plugmut-extras pytest plugmut-extras/tests/ -k "async" -v
 
 # Confirm no operator produces a mutation identical to its input
-uv run --package mutmut-extras pytest mutmut-extras/tests/ -v
+uv run --package plugmut-extras pytest plugmut-extras/tests/ -v
 ```
