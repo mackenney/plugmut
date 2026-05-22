@@ -1,0 +1,3 @@
+[tool.plugmut]
+paths_to_mutate = ["src/real_world/"]
+tests_dir = ["tests/"]

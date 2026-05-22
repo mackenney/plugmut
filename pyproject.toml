@@ -21,7 +21,7 @@ plugmut-dedup = { workspace = true }
 
 [tool.uv.workspace]
 members = ["mutmut", "plugmut-extras", "plugmut-llm", "plugmut-dedup"]
-exclude = ["mutmut/e2e_projects/*"]
+exclude = ["mutmut/e2e_projects/*", "e2e_projects/*"]
 
 [tool.ruff]
 line-length = 120
@@ -31,6 +31,7 @@ extend-exclude = [
     "mutmut/docs/conf.py",
     "mutmut/e2e_projects/",
     "mutmut/tests/data/test_generation/",
+    "e2e_projects/",
 ]
 
 [tool.ruff.lint]
