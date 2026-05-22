@@ -134,6 +134,7 @@ class TestGeneration:
             )
 
         entries = Library(base_dir=E2E_PROJECT).list_all()
+        assert entries, "No cache entries generated — generation may have failed (rate limit?)"
         for entry in entries:
             # The function name may be qualified (e.g. "Class.method") — take the bare name
             bare_name = entry.function_name.split(".")[-1]
@@ -168,6 +169,7 @@ class TestGeneration:
             )
 
         entries = Library(base_dir=E2E_PROJECT).list_all()
+        assert entries, "No cache entries generated — generation may have failed (rate limit?)"
         for entry in entries:
             bare_name = entry.function_name.split(".")[-1]
             original_code = original_funcs.get(bare_name, "")
