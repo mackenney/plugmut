@@ -45,15 +45,13 @@ def _register_extras():
 
 
 def _register_llm(cache_dir: Path):
-    pm = get_plugin_manager()
-    import mutmut_llm.operators as llm_ops
-    from mutmut_llm.cache import list_cache_entries  # ty: ignore[unresolved-import]
-    from mutmut_llm.operators import operator_llm
-
-    entries = list_cache_entries(base_dir=cache_dir)
-    llm_ops._cache_index = {e.source_hash: e for e in entries}  # ty: ignore[unresolved-attribute]
-
     import libcst as cst
+
+    from mutmut_llm.library import Library
+    from mutmut_llm.operators import operator_llm, set_library
+
+    pm = get_plugin_manager()
+    set_library(Library(base_dir=cache_dir))
 
     class _LLM:
         @staticmethod
@@ -62,7 +60,6 @@ def _register_llm(cache_dir: Path):
             return [(cst.FunctionDef, operator_llm)]
 
     pm.register(_LLM())
-
 
 def _register_dedup():
     pm = get_plugin_manager()
