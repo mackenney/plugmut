@@ -1,25 +1,23 @@
 # plugmut
 
-UV workspace extending [mutmut](https://github.com/boxed/mutmut) with additional mutation operators via its pluggy hook system. The `mutmut/` submodule is a fork of upstream mutmut, published as `plugmut` on PyPI. Plugins live in this repo.
+> **⚠️ Experimental — not ready for production use.**
+> This repo is a personal research project. APIs, hook contracts, and package names may change
+> without notice. Do not depend on any published package from this repo in production code.
+
+A close fork of [mutmut](https://github.com/boxed/mutmut) extended with a [pluggy](https://pluggy.readthedocs.io/) hook system. The rationale: mutmut's mutation engine is solid and battle-tested, but its operator set and pipeline are fixed. By adding pluggy hooks at the right lifecycle points — operator registration, mutation filtering, post-test reporting — the core can stay close to upstream while plugins add operators, deduplication, LLM-based generation, and custom reporting without touching the fork.
 
 ## Structure
 
 - `mutmut/` — Git submodule ([mackenney/mutmut](https://github.com/mackenney/mutmut) fork). Published as `plugmut`. Patched sparingly; every patch has a conflict-resolution guide.
-- `plugmut-extras/` — Plugin package (`plugmut-extras`) with 19 additional mutation operators.
-- `plugmut-llm/` — Plugin package (`plugmut-llm`) for LLM-powered mutation generation (Claude by default; additional backends can be added).
-- `plugmut-dedup/` — Plugin package (`plugmut-dedup`) for structural and bytecode deduplication.
+- `plugmut-extras/` — Plugin package with 19 additional mutation operators.
+- `plugmut-llm/` — Plugin package for LLM-powered mutation generation (Claude by default).
+- `plugmut-dedup/` — Plugin package for structural and bytecode deduplication.
 - `conflict-resolution/` — Guides for resolving conflicts when syncing upstream changes.
 
 ## Setup
 
 ```bash
 git clone --recurse-submodules https://github.com/mackenney/plugmut
-uv sync
-```
-
-Or via `just`:
-
-```bash
 just sync
 ```
 
@@ -27,18 +25,8 @@ just sync
 
 ```bash
 just test         # run all tests
-just check        # lint + format-check (matches upstream ruff config)
+just check        # lint + format-check
 just fix          # ruff check --fix + format in-place
-```
-
-Direct `uv` commands:
-
-```bash
-uv run --package plugmut pytest mutmut/tests/         # core tests
-uv run --package plugmut-extras pytest                 # extras unit tests
-uv run --package plugmut-llm pytest                    # llm unit tests
-uv run --package plugmut-dedup pytest                  # dedup unit tests
-uv run --package plugmut pytest mutmut/tests/e2e/     # e2e tests
 ```
 
 ## Adding an operator
