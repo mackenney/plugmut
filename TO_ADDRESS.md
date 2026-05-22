@@ -28,7 +28,7 @@ When ready to publish:
    - `plugmut-llm` → `mackenney/plugmut`, workflow `publish.yml`
    - `plugmut-dedup` → `mackenney/plugmut`, workflow `publish.yml`
 4. Create `pypi` GitHub environment in each repo
-5. Run placeholder verification: `grep -r "{{" mutmut-extras/ mutmut-llm/ mutmut-dedup/ README.md --include="*.toml" --include="*.md"` (expected: no output)
+5. Run placeholder verification: `grep -r "{{" plugmut-extras/ plugmut-llm/ plugmut-dedup/ README.md --include="*.toml" --include="*.md"` (expected: no output)
 6. Tag and publish
 
 ---
